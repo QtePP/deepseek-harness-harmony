@@ -1,0 +1,12 @@
+{
+  "modelVersion": "6.0.2",
+  "description": "DeepSeek Harness (dsh) on HarmonyOS — native ArkUI client with an in-process Node runtime.",
+  "dependencies": {
+    "@fellow99/node-bridge": "0.1.0",
+    "@fellow99/node-runtime": "24.2.0"
+  },
+  "devDependencies": {
+    "@ohos/hypium": "1.0.25",
+    "@ohos/hamock": "1.0.0"
+  }
+}

@@ -1,0 +1,26 @@
+# HarmonyOS profile patch — MINIMAL SET.
+#
+# 原则：只禁用「调用即失败」的用户级工具，不动服务级行。
+# 禁用服务行会连带打掉依赖它的能力，实测代价：
+#   · 禁 subprocess → tool-fs-search / ptc-runtime / workflow-ptc / tool-workflow 全部 pending
+#   · 禁 tool-bash  → shell 服务缺失 → permission-presets pending（权限门失效，属安全降级）
+# 本地对比：不加补丁 0 个未激活；早期版本禁用 subprocess + tool-bash 后 5 个未激活。
+#
+# 启用方式：复制为 ohos.patch.yml 后重新装配载荷。
+# 核对行 id：node node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --dump-config
+
+# Windows 专用，鸿蒙上永远无效。
+- id: tool-pwsh
+  disabled: true
+- id: pwsh-sandbox
+  disabled: true
+
+# 插件市场依赖 pnpm 子进程，鸿蒙禁止 fork。
+- id: plugin-manager
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true
+
+# Office 文档转换绑定 koffi（原生 FFI），签名域外无法加载。
+- id: skill-office
+  disabled: true

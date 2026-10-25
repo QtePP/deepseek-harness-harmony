@@ -1,0 +1,25 @@
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+# Local secrets — never commit
+entry/src/main/resources/rawfile/secrets.json
+
+# Assembled dsh payload (regenerate with scripts/assemble-payload.mjs)
+entry/src/main/resources/rawfile/dsh-payload.zip
+/.build
+
+# Local tool caches
+/.cache
+/.workbuddy-ai
+
+# Local signing material backup (restore to re-enable debug signing)
+build-profile.signing.json5
