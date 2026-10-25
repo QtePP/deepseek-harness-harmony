@@ -8,9 +8,9 @@ ArkUI，后端是同一应用进程内的真 dsh 运行时。
 │                                                                        │
 │  ArkTS / ArkUI 前端                                                     │
 │    pages/Index.ets          三形态断点（<840vp 单栏 / ≥840vp 双栏）       │
-│    view/ChatView.ets        消息流 + 输入区（自绘气泡、代码块分段）        │
-│    view/SessionRail.ets     会话列表                                     │
-│    view/SettingsSheet.ets   API Key / 模型 / 诊断                        │
+│    view/ChatView.ets        消息流 + 输入区（自绘气泡、文件 chip）        │
+│    view/SessionRail.ets     项目条 + 会话列表                             │
+│    view/SettingsSheet.ets   API Key / 模型 / 能力开关 / 诊断              │
 │         │                                                              │
 │         │  newline-delimited JSON-RPC 2.0 over 127.0.0.1:4517          │
 │         ▼                                                              │
@@ -59,12 +59,16 @@ EntryAbility → Index.aboutToAppear
 第 5 步的顺序是刻意的：`bootstrap.cjs` **只在有客户端连入时才启动 dsh**，这样 dsh 的
 stdout 从第一帧起就有接收方，不会丢初始化输出。
 
-## 协议面（只有 5 个方法）
+## 协议面（客户端 5 个请求 + 服务端 4 个通知）
 
-客户端 → 服务端：
+客户端 → 服务端（`model/DshClient.ets`）：
 
-- `initialize` `{cwd, provider, model, reasoningEffort?, maxTokens?}` → `{serverInfo}`
+- `initialize` `{cwd, provider, model, reasoningEffort?, maxTokens?}` → `{serverInfo}`（超时 180s）
 - `session/prompt` `{sessionId, contentBlocks:[{type:'text',text}]}` → `{messageId}`（入队回执，不是答案）
+- `session/resume` `{sessionId}` —— 从 `.zstd` 日志恢复服务端上下文；日志按 id **全局**查找
+  （跨项目目录扫描），恢复出的会话带着持久化的工作目录
+- `session/working-directory/set` `{sessionId, path}` —— 要求目录已存在；作为持久事件写进
+  会话日志，resume 后依然生效，并注入模型可见的 notice
 - `shutdown`
 
 服务端 → 客户端通知：
@@ -73,7 +77,10 @@ stdout 从第一帧起就有接收方，不会丢初始化输出。
 - `session.status` — `running` / `idle`
 - `subagent.started` / `subagent.finished`
 
-`sessionId` 由客户端生成；运行时不认识就**懒创建** agent+session，所以「新会话」不需要额外请求。
+`sessionId` 由客户端生成；`session/prompt` 对未知 id **懒创建** agent+session，所以「新会话」不需要额外
+请求。客户端的打开策略（`Index.ensureSessionOpen`）：先试 `resume`——只要存在持久日志（哪怕只记录过
+一次工作目录切换）就恢复；"not found" 则走新建路径，非默认项目先 `working-directory/set` 指向项目
+workspace（`ProjectStore.workspaceDir`）。
 
 ## 渲染的事件
 
@@ -125,7 +132,7 @@ session.status      → running → idle
 - **没有 token 级流式**：SDK 协议只在一步结束时发 `assistant/message`，不发增量。UI 用
   `session.status` 显示「正在执行」。想要逐字流式，得改走 dsh 的 Web WS 协议（那是另一套、且面向浏览器信任域）。
 - **工具面取决于载荷**：没有 `git`/`rg` 二进制，`bash` 类工具在纯 JS 兜底前不可用。
-- **会话续接是本地账本**：运行时侧 `sessionId` 懒创建，本项目用自己的本地索引做「历史会话」列表与回放，
-  不复用 dsh 的会话存储格式。
-- **密钥在 HAP 内**：`rawfile/secrets.json` 会被打进安装包，只适合自用/内测；正式分发应改为首次启动手填
-  或服务端换发短期凭证。
+- **会话续接是双层账本**：服务端 `.zstd` 日志是唯一权威（`session/resume` 恢复上下文与工作目录）；
+  本地 `SessionStore` 只维护 UI 索引与消息缓存（最近 200 条），两者以 sessionId 关联。
+- **密钥优先级：设置页（preferences）> 打包的 `rawfile/secrets.json`**（已 gitignore；一旦随包
+  分发就等于交出密钥，只适合自用/内测。正式分发应改为首次启动手填或服务端换发短期凭证）。

@@ -267,18 +267,12 @@ function install() {
   } else if (typeof globalThis.fetch !== 'function') {
     define('fetch', fetchImpl)
   }
-  define('Headers', Headers)
-  define('Response', Response)
-  define('Request', class Request {
-    constructor(url, init) {
-      const options = init || {}
-      this.url = typeof url === 'string' ? url : url.url
-      this.method = (options.method || 'GET').toUpperCase()
-      this.headers = new Headers(options.headers)
-      this.body = options.body
-      this.signal = options.signal
-    }
-  })
+  // Deliberately NOT redefining Headers / Response / Request: measured on Node
+  // 24.2.0, redefining any of the three materialises Node's lazy web globals,
+  // which initialises the built-in undici and rejects with
+  // "WebAssembly is not defined" under --jitless. Redefining `fetch` alone is
+  // safe, and callers that construct Headers themselves still get ours through
+  // the returned Response objects.
 
   // CommonJS alias: `require('undici')` resolves here.
   const original = Module._resolveFilename

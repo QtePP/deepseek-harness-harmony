@@ -152,6 +152,27 @@ hvigorw --mode module -p product=default assembleHap --no-daemon
 产物：`entry/build/default/outputs/default/entry-default-unsigned.hap`（未签名）或
 `entry-default-signed.hap`（配好签名后）。
 
+### 签名配置被拆到本地文件（重要）
+
+`build-profile.json5` 里 `signingConfigs` 是**空的**（密钥不进版本库），真实配置在
+`build-profile.signing.json5`（本地文件）。命令行构建必须先合并、构建完再还原，否则 hvigor 会
+打印 `Will skip sign 'hos_hap'`，产物只有 `entry-default-unsigned.hap`：
+
+```bash
+cp build-profile.json5 /tmp/bp.bak
+python3 - << 'EOF'
+import re
+sig = open('build-profile.signing.json5').read()
+block = re.search(r'signingConfigs:\s*\[(.*?)\n    \],', sig, re.S).group(0)
+s = open('build-profile.json5').read()
+open('build-profile.json5','w').write(s.replace('signingConfigs: [],', block))
+EOF
+hvigorw --mode module -p product=default assembleHap --no-daemon
+cp /tmp/bp.bak build-profile.json5        # 立刻还原
+```
+
+DevEco Studio 里则直接 Build 即可（IDE 会读本地签名文件）。
+
 ### 在受限环境里跑 devecocli 的两个坑
 
 | 现象 | 原因 | 处理 |
@@ -167,7 +188,7 @@ hvigorw --mode module -p product=default assembleHap --no-daemon
 | 启动卡在「等待 Node 主循环就绪」 | Node 启动失败 | 设置 → 诊断，看 `stage=`（`dlopen`/`dlsym`/`stdio`/`start`）与 `node.log` |
 | `SIGTRAP` 崩溃 | 无 JIT ACL 却跑了 JIT | 确认 `flags` 含 `--jitless`（`NodeHost` 默认已带） |
 | 网络请求全失败、日志提 `WebAssembly` | jitless 下 undici 不可用 | 确认 `fetch-shim.cjs` 已随包且 `wasm: unavailable` 时被安装 |
-| `session/prompt` 超时 | dsh 未启动完就发了请求 | 首次握手 `initialize` 超时已放宽到 90s；检查桥状态文件 |
+| `session/prompt` 超时 | dsh 未启动完就发了请求 | 首次握手 `initialize` 超时已放宽到 180s；检查桥状态文件 |
 | 崩溃后无法恢复 | `node::Start` 不可重入 | 彻底退出应用再打开（UI 会明示） |
 
 诊断入口：设置 → 诊断，聚合了 phase、桥状态 JSON、Node 日志尾 120 行、崩溃记录。

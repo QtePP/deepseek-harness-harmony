@@ -13,6 +13,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# 开源口径：仓库内 build-profile.json5 不带签名。本脚本注入签名构建后自动还原，
+# 崩溃/中断由 trap 兜底，避免签名材料残留在已入库文件里。
+STRIPPED_BAK="/tmp/dshharmony-build-profile.stripped.json5"
+INJECTED_SIGNING=0
+restore_profile() {
+  if [ "$INJECTED_SIGNING" = "1" ] && [ -f "$STRIPPED_BAK" ]; then
+    mv "$STRIPPED_BAK" build-profile.json5
+    echo "已还原无签名的 build-profile.json5（签名保留在 build-profile.signing.json5）"
+  fi
+}
+trap restore_profile EXIT
+
 DEVECO_CLI="${DEVECO_CLI:-devecocli}"
 DEVICE="${1:-}"
 
@@ -51,14 +63,24 @@ if ! "$DEVECO_CLI" auth status 2>&1 | grep -qi "logged in"; then
 fi
 say "账号状态：$("$DEVECO_CLI" auth status 2>&1 | head -1)"
 
-# 4. 签名材料（只在缺失时生成）
-if grep -q '"signingConfigs": *\[\s*\]' build-profile.json5; then
-  say "生成签名材料（首次需要，会写入 build-profile.json5）…"
-  "$DEVECO_CLI" signature generate || die "签名生成失败。
+# 4. 签名材料（仅在缺失时检出/生成；构建后由 trap 还原开源口径）
+if grep -qE 'signingConfigs:[[:space:]]*\[[[:space:]]*\]' build-profile.json5; then
+  if [ -f build-profile.signing.json5 ]; then
+    say "检出本地签名备份 → build-profile.json5"
+    cp build-profile.json5 "$STRIPPED_BAK"
+    cp build-profile.signing.json5 build-profile.json5
+    INJECTED_SIGNING=1
+  else
+    say "生成签名材料（首次需要，会写入 build-profile.json5）…"
+    cp build-profile.json5 "$STRIPPED_BAK"
+    "$DEVECO_CLI" signature generate || die "签名生成失败。
 常见原因：
   · bundleName 在 AppGallery Connect 已被占用 → 改 AppScope/app.json5 的 bundleName 为更独特的名字
   · 账号未实名 / 团队权限不足 → devecocli auth team
   · 设备 UDID 未注册 → 确认手机已连接后再生成"
+    cp build-profile.json5 build-profile.signing.json5
+    INJECTED_SIGNING=1
+  fi
 else
   say "已有签名配置，跳过生成（要重建加 --force：devecocli signature generate --force）"
 fi
