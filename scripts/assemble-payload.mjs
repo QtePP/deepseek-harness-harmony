@@ -20,7 +20,7 @@
  * Usage:
  *   node scripts/assemble-payload.mjs                # install + pack
  *   node scripts/assemble-payload.mjs --skip-install  # repack existing staging
- *   node scripts/assemble-payload.mjs --dsh-version 0.2.1-rc.2
+ *   node scripts/assemble-payload.mjs --dsh-version 0.2.1-rc.3
  */
 
 import { execFileSync } from 'node:child_process'

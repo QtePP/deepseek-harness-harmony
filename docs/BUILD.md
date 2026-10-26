@@ -50,7 +50,7 @@ node scripts/assemble-payload.mjs
 `host/bootstrap.cjs`、`host/fetch-shim.cjs` 与 `host/patches/` → 校验 `lib/bin.js` 存在 →
 打成 `entry/src/main/resources/rawfile/dsh-payload.zip`。
 
-迭代时可加 `--skip-install` 只重新打包；指定版本用 `--dsh-version 0.2.1-rc.2`；
+迭代时可加 `--skip-install` 只重新打包；指定版本用 `--dsh-version 0.2.1-rc.3`；
 换一个全新的 staging 目录用 `--staging .build/payload-b`（避免删大目录触发安全策略）。
 
 **为什么必须 `--ignore-scripts`**：`koffi` 是 dsh 的普通依赖，安装时会尝试用 CMake 编译原生
