@@ -162,3 +162,60 @@ return hits
 - `packages/ptc-runtime/ptc-runtime-node/README.md`：`Run TypeScript programs in fresh Node processes`
 - 设备侧 `bridge-status.json`（`profile: acp`, `wasm: false`）与 `bridge.log`（0 未激活）
 - 真机 `tool_call` 观测：`bash → status=failed`（见 `docs/SPIKE-ACP.md` §2）
+
+---
+
+## 7. 附录：插件落地机制（实测，含未通过的一步）
+
+要把纯 JS 搜索插件塞进运行时，必须先解决"怎么加一行"。四条路都试过：
+
+| 做法 | 结果 |
+|---|---|
+| `--patch` 里写 `- id: 新id` + `name` | ❌ `patch: entry "新id" not found`——**patch 只能改/禁已有行，不能新增** |
+| patch 用 `insert:` | ❌ `patch insert: entry "tool-fs-search" is not a group`——只能插进 group，acp profile 里没有 group |
+| 自定义 profile（`package.json` 的 `dsh.profile.bundles` 加自建 bundle 包） | ✅ **行能进组合配置**：`--dump-config` 能看到新行，`boot: --profile ohos` 正常挂载 |
+| 同上，并让插件真正注册 | ❌ **未通过**：模型工具列表里没有新工具（见下） |
+
+自定义 profile 的形状（`--from-default-profile acp` 生成后改）：
+
+```
+$DSH_HOME/profiles/ohos/
+├── package.json      # dsh.profile.bundles: [dsh-base, dsh-acp-app, @ohos/dsh-bundle-x]
+├── cordis.patch.yml  # 本 profile 的 patch 层（可禁已有行）
+├── cordis.yml        # 根，保持 []
+└── pnpm-workspace.yaml
+```
+
+bundle 包只需 `package.json` 里声明 `dsh.bundle.patch: './cordis.patch.yml'`，
+该 patch 文件里写的行会作为**新行**进入组合树（bundle 层不是 overlay，所以不受"只能改已有行"限制）。
+
+**卡住的一步**：行进了配置，但插件没 mount。已排除的：profile 能正常 boot、`--dump-config` 无报错、
+把插件软链进 `profiles/ohos/node_modules/@ohos/` 之后仍然没有。模型侧实测工具列表为：
+
+```
+bash, create_goal, edit, exit_plan_mode, get_goal, glob, grep, interrupt_agent,
+job_kill, job_list, job_output, list_agents, read, read_image, send_message,
+skill, subagent, subagent_fork, todo_write, update_goal, web_fetch, web_search,
+workflow, working_directory
+```
+
+没有我们加的 `ping`。下一步要试的方向（按可能性排序）：
+
+1. profile 的 `package.json` **dependencies 里声明插件**，再跑 profile 自己的 pnpm install
+   （profile 目录里有 `pnpm-workspace.yaml`，说明依赖是按 profile 装的，不是从载荷根解析）
+2. bundle 的 `cordis.patch.yml` 里用**相对路径**引用插件（文档提到 "Inserted relative plugin
+   paths are anchored beside their patch file"）
+3. 把插件直接放进 bundle 包内，由 bundle 的 patch 用相对路径加载
+
+> 工具定义的正确形状（从 `tool-fs/src/read.ts` 取，供实现时对齐）：
+> ```js
+> defineTool({
+>   name, description,
+>   parameters: { p: { type: 'string', required: true, description } },
+>   output: {
+>     schema: { type: 'object', additionalProperties: false, properties: { ... } },
+>     render: (args, value) => [{ type: 'text', text: '...' }]
+>   },
+>   execute: async (args) => ({ ... })   // 返回值必须满足 output.schema
+> })
+> ```

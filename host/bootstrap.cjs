@@ -32,21 +32,27 @@ const STATUS_FILE = path.join(DSH_HOME, 'bridge-status.json')
 const LOG_FILE = path.join(DSH_HOME, 'bridge.log')
 
 /**
- * Which dsh program interface to mount. `sdk` is the default and the only one
- * with device sign-off; `acp` is opt-in for the ACP migration
- * (docs/SPIKE-ACP.md) and has NOT been verified on device yet.
+ * Which dsh profile to mount: a shipped bundle name (`sdk` / `acp`) or a custom
+ * profile directory under $DSH_HOME/profiles. Defaults to `sdk`.
  *
- * Both speak newline-delimited JSON-RPC over stdio, so the bridge does not care
- * which one is mounted — the client does, because the method sets differ:
+ * The name is passed through rather than whitelisted: a custom profile (`ohos`)
+ * is how platform plugins get mounted — profile patches can only override or
+ * disable existing rows, never add one (verified: "patch: entry X not found"),
+ * so new rows must come from a bundle listed in the profile's
+ * `dsh.profile.bundles`.
+ *
+ * Both shipped profiles speak newline-delimited JSON-RPC over stdio, so the
+ * bridge does not care which one is mounted — the client does, because the
+ * method sets differ:
  *
  *   sdk: initialize / session/prompt / session/resume /
  *        session/working-directory/set / shutdown
  *   acp: initialize / session/new / session/list / session/resume /
- *        session/close / session/setConfigOption / session/prompt /
+ *        session/close / session/set_config_option / session/prompt /
  *        session/cancel  (+ notifications session/update, and the server-issued
  *        request `session/request_permission`)
  */
-const PROFILE = process.env.DSH_PROFILE === 'acp' ? 'acp' : 'sdk'
+const PROFILE = (process.env.DSH_PROFILE || 'sdk').trim() || 'sdk'
 
 let booted = false
 let client = null
