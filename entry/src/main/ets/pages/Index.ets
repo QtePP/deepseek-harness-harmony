@@ -892,8 +892,10 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .padding(20)
           .width('86%')
+          .constraintSize({ maxWidth: 460 })
           .borderRadius(16)
           .backgroundColor($r('app.color.background'))
+          .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)', offsetY: 8 })
           .onClick(() => {
           })
         }
@@ -902,7 +904,6 @@ struct Index {
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
         .backgroundColor('rgba(0,0,0,0.4)')
-        .onClick(() => this.answerApproval(false))
       }
 
       if (this.showModelSheet) {
@@ -951,8 +952,10 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .padding(20)
           .width('86%')
+          .constraintSize({ maxWidth: 460 })
           .borderRadius(16)
           .backgroundColor($r('app.color.background'))
+          .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)', offsetY: 8 })
           .onClick(() => {
           })
         }

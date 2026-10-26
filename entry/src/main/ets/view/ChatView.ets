@@ -249,20 +249,31 @@ export struct ChatView {
       Divider().color($r('app.color.divider'))
 
       if (this.messages.length === 0) {
-        Column({ space: 10 }) {
-          Text('dsh 已就绪')
-            .fontSize(18)
-            .fontWeight(FontWeight.Medium)
-          if (this.projectName.length > 0) {
-            Text(`当前项目：${this.projectName}`)
-              .fontSize(12)
-              .fontColor($r('app.color.text_tertiary'))
+        Column() {
+          Column({ space: 10 }) {
+            Row({ space: 8 }) {
+              Circle({ width: 10, height: 10 }).fill($r('app.color.brand'))
+              Text('dsh 已就绪')
+                .fontSize(18)
+                .fontWeight(FontWeight.Medium)
+            }
+            if (this.projectName.length > 0) {
+              Text(`当前项目：${this.projectName}`)
+                .fontSize(12)
+                .fontColor($r('app.color.text_tertiary'))
+            }
+            Text('后端运行在本机应用进程内。\n可以让我读文件、改代码、检索网页。\n生成的网页与图片可在对话中点开预览。')
+              .fontSize(13)
+              .lineHeight(20)
+              .textAlign(TextAlign.Center)
+              .fontColor($r('app.color.text_secondary'))
           }
-          Text('后端运行在本机应用进程内。\n可以让我读文件、改代码、检索网页。\n生成的网页与图片可在对话中点开预览。')
-            .fontSize(13)
-            .lineHeight(20)
-            .textAlign(TextAlign.Center)
-            .fontColor($r('app.color.text_secondary'))
+          .alignItems(HorizontalAlign.Center)
+          .padding({ left: 32, right: 32, top: 28, bottom: 28 })
+          .backgroundColor($r('app.color.surface'))
+          .borderRadius(20)
+          .constraintSize({ maxWidth: 420 })
+          .shadow({ radius: 16, color: 'rgba(0,0,0,0.05)', offsetY: 4 })
         }
         .layoutWeight(1)
         .width('100%')
@@ -279,7 +290,7 @@ export struct ChatView {
         }
         .layoutWeight(1)
         .width('100%')
-        .padding({ left: 16, right: 16, top: 12 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
         .edgeEffect(EdgeEffect.Spring)
       }
 
