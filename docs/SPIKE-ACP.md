@@ -25,7 +25,7 @@
 | 审批答错即失败 | — | ✅ | 回 `{}` 时 `status=failed`（fail-closed，不是 hang） |
 | 取消 | `session/cancel`（**通知，无 id**） | ✅ | 发出后 prompt 响应 `{"stopReason":"cancelled"}`，之后 0 条 update；作为**请求**发送则 `Method not found` |
 | 切配置 | `session/set_config_option` | ✅ | `setConfigOption` / `set_model` / `set_mode` 均 `Method not found`；`model` 的 value 是 JSON 数组字符串 |
-| 真机（arm64/jitless） | — | ⚠️ 未测 | 本 spike 只在桌面 Node 22 上跑 |
+| 真机（arm64/jitless） | — | ✅ | fport 矩阵 2026-10-26（§9）：14 项实机通过，审批放行后文件真实落盘 |
 
 ---
 
@@ -119,13 +119,17 @@
 
 ## 6. 未覆盖，切换前必须补测
 
-| 项 | 为什么要补 |
+> 2026-10-26 更新：下表前四行已在真机矩阵覆盖（见 §9）；本节剩余项为长任务保序与
+> ArkTS 客户端接入。
+
+| 项 | 状态 |
 |---|---|
-| `session/cancel` | 手机端「停止」按钮的唯一手段 |
-| `session/setConfigOption` | 模型/推理强度切换 |
-| `session/close` | 会话生命周期收尾 |
-| 真机 arm64 + `--jitless` | 本 spike 是桌面 Node；jitless 下流式与审批是否同样正常未验证 |
-| 长任务下的 update 顺序 | `outputTail` 保序在真机高延迟下是否成立 |
+| `session/cancel` | ✅ 真机矩阵（§9）：通知形态，`stopReason:"cancelled"`，取消后 0 update |
+| `session/set_config_option` | ✅ 真机矩阵 + 追加探测（§9.1）：含选项集收缩契约 |
+| `session/close` | ✅ 真机矩阵（§9）：close → list 可见 → resume 成功 |
+| 真机 arm64 + `--jitless` | ✅ 真机矩阵（§9）：流式/审批/取消与桌面一致 |
+| 长任务下的 update 顺序 | ⚠️ 仍开放：矩阵 prompt 较短，`outputTail` 保序在长任务下未压测 |
+| ArkTS 客户端（AcpClient）+ 审批 UI | ⚠️ 仍开放：下一阶段工作 |
 
 ---
 
@@ -175,3 +179,41 @@ App 切后台会断 socket。实测（同进程、两次连接）：
 
 > 这一条直接决定 ArkTS 侧的重连逻辑：**先 prompt，失败再 resume**；而不是先 resume。
 > 反过来写会在每次切后台回来后弹一个 `already active` 错误。
+
+---
+
+## 9. 真机矩阵（fport，2026-10-26）
+
+设备 arm64 + `--jitless`（内嵌 Node 24.2.0），测试构建以 `DSH_PROFILE=acp` +
+`DSH_PERMISSION_MODE=read-only` 停靠（App 客户端不 connectBridge），Mac 经
+`hdc fport tcp:14517 tcp:4517` 直连桥驱动。14 项：13 过 + 1 项（3b flip-back）
+判为新契约（§9.1），无客户端侧失败。
+
+| # | 项 | 结果 |
+|---|---|---|
+| 1 | initialize | ✅ `deepseek-harness-acp v0.0.1` |
+| 2 | session/new | ✅ 服务端生成 sessionId + configOptions |
+| 3a | set_config_option 翻转 model | ✅ currentValue 随之更新 |
+| 3b | set_config_option 翻回 | 见 §9.1：`-32602 unknown model option`（选项集收缩，非 bug） |
+| 4a | prompt → end_turn | ✅ 含工具调用 |
+| 4b | request_permission | ✅ read-only 下触发；答 `allow-once` 后工具真实写盘（25B 文件落 workspace，时间戳吻合） |
+| 4c | 流式 update | ✅ 节奏与桌面一致（审批前 9 条；取消轮共 2 条） |
+| 5a | cancel（通知） | ✅ `stopReason:"cancelled"` |
+| 5b | 取消后 update 静默 | ✅ 0 条新增 |
+| 6a | 断线重连 + initialize | ✅ 幂等 |
+| 6b | 重连后对活跃会话直接 prompt | ✅ `end_turn`（不 resume） |
+| 7 | session/close | ✅ `{}` |
+| 8 | session/list 含已关会话 | ✅（4 个） |
+| 9 | session/resume 已关会话 | ✅ |
+
+### 9.1 set_config_option 选项集收缩（矩阵 3b 的解释）
+
+连续两次 `session/set_config_option(model)`：翻转（`deepseek-v4-flash` → `deepseek-flash`）
+成功后，**响应里的选项集少了一项**——`deepseek-v4-flash` 从菜单消失，只剩 flash /
+v4-pro；再切回 v4-flash 被 `-32602 Invalid params: unknown model option` 拒绝。即：
+
+- 响应的 `configOptions` 是**新的权威列表**，选择器不得缓存旧列表；
+- 默认模型一旦切走，该会话无法切回（唯一途径是新建会话）；
+- 客户端把 `-32602` 当「选项已不可用」处理（刷新列表），不是传输错误。
+
+已同步至 `AGENTS.md` §4.2。

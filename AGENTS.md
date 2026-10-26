@@ -99,6 +99,12 @@ ACP 实测契约（勿凭直觉改）：
   **请求**（带 id）发送同样是 `Method not found`，它是通知。
 - `session/set_config_option` 的 `value` 对 `model` 是**JSON 数组字符串**
   （`'["deepseek-official","deepseek-v4-pro"]'`），不是对象；传错会静默不改。
+- **set_config_option 后选项集会收缩**（真机实测）：切到 `deepseek-flash` 后
+  `deepseek-v4-flash` 从选项中消失，切回被 `-32602 unknown model option` 拒绝。响应里的
+  `configOptions` 是**新的权威列表**，选择器不得缓存旧列表；默认模型一旦切走，该会话无法
+  切回（唯一途径是新建会话）；`-32602` 是「选项已不可用」，不是传输错误。
+- 帧必须带 `"jsonrpc":"2.0"`：缺失时预校验直接回 `-32600 Invalid request`（`id:null`，
+  data 回显原帧），到不了方法分发。
 - **断线重连**：桥保持流不关闭，重连后 `initialize` 幂等，**直接对旧 sessionId 发 prompt 即可**；
   不要 resume（会撞 `already active`）。
 - `configOptions` 是模型列表的权威来源，客户端不要硬编码模型。
@@ -137,7 +143,12 @@ ACP 实测契约（勿凭直觉改）：
 - `feature/acp` 分支（workbuddy，2026-10-26）：`host/bootstrap.cjs` 引入 `DSH_PROFILE`
   开关（默认 `sdk`，未改动 SDK 路径），`bridge-status.json` 增加 `profile` 字段；两个 profile
   均通过本地桥 smoke（sdk `initialize → serverInfo`；acp `initialize + session/new → sessionId`）。
-  断线重连契约已实测并写入 §4.2。**ArkTS 客户端与审批 UI 未动，ACP 未真机验收。**
+  断线重连契约已实测并写入 §4.2。
+- ACP 协议矩阵已在真机闭环（2026-10-26，fport 外部驱动 + `DSH_PERMISSION_MODE=read-only`
+  测试构建）：initialize / session/new / set_config_option / prompt（审批 `allow-once` 放行
+  后工具真实落盘）/ cancel（通知）/ 断线重连 / close / list / resume 全部实机通过；新发现
+  set_config_option 选项集收缩契约（§4.2）。详见 `docs/SPIKE-ACP.md` §9。
+  **ArkTS 客户端（AcpClient）与审批 UI 仍未动。**
 - 真机序列号等本地信息只记在本地记忆（`.workbuddy-ai/memory/`，gitignored），**不写进公开仓库**。
 
 签名口径（开源卫生）：
