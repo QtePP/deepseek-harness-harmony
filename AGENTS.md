@@ -22,7 +22,7 @@
 | **dsh** | 唯一的「大脑」：npm 包 `@deepseek-ai/dsh`（0.2.1-rc.2，依赖树 614 包）。会话、工具调用、插件、模型适配、持久化全部来自它；本仓库不含任何 AI 能力 | 载荷内 node_modules |
 | **Harness / 外壳** | 本仓库自身：ArkUI 界面 + 宿主适配层 | 本仓库 |
 | **Payload / 载荷** | `dsh-payload.zip`（≈156MB）：dsh 及其依赖打进 HAP rawfile，首启解包到沙箱 | `scripts/assemble-payload.mjs`、`entry/.../host/Payload.ets` |
-| **Bridge / 桥** | 127.0.0.1:4517 回环 TCP，承载 newline-delimited JSON-RPC 2.0；bootstrap 把 socket 伪装成 dsh 的 stdio | `host/bootstrap.cjs`、`entry/.../model/DshClient.ets` |
+| **Bridge / 桥** | 127.0.0.1:4517 回环 TCP，承载 newline-delimited JSON-RPC 2.0；bootstrap 把 socket 伪装成 dsh 的 stdio。**单客户端**：新连接 `replacing previous client` 顶掉旧连接 | `host/bootstrap.cjs`、`entry/.../model/DshClient.ets` |
 | **Host 层** | 把 Node 拉进鸿蒙进程的适配层：NAPI dlopen `libnode.so` + `node::Start` | `entry/.../host/NodeHost.ets`、`@fellow99/node-bridge` |
 | **Profile SDK / ACP** | dsh 两条程序接口，都是 stdio 上的换行 JSON-RPC、流均可注入。**SDK**：5 个方法，默认路径，真机验收过。**ACP**：9 个方法 + 流式 update + 服务端发起审批，进程内可跑（spike 已证），`DSH_PROFILE=acp` opt-in、尚未真机验收。出局的只是「宿主 spawn dsh」，不是 ACP 本身 | `host/bootstrap.cjs`、`docs/SPIKE-ACP.md` |
 | **Session / 会话** | 客户端生成 UUID 作 id；服务端持久日志 `session.v4.jsonl.zstd`（按初始化 cwd 的 slug 存放，id 全局可查）；本地 `SessionStore` 只存 UI 索引与消息缓存（最近 200 条） | `entry/.../model/ChatModel.ets` |
@@ -108,7 +108,15 @@ ACP 实测契约（勿凭直觉改）：
 - **断线重连**：桥保持流不关闭，重连后 `initialize` 幂等，**直接对旧 sessionId 发 prompt 即可**；
   不要 resume（会撞 `already active`）。
 - `configOptions` 是模型列表的权威来源，客户端不要硬编码模型。
-- 审批档位由 `DSH_PERMISSION_MODE` 决定（默认 `workspace-write` 不问；`read-only` 才触发审批）。
+- **权限三档（dsh 具名预设，沙箱+审批捆绑）**：`DSH_PERMISSION_MODE` = `read-only` /
+  `workspace-write`（默认）/ `danger-full-access`，审批策略 `=== 'danger-full-access' ?
+  'never' : 'ask'`。read-only：裸写先被沙箱拒（无审批请求），agent 带
+  `sandbox_permissions`+`justification` 重试才触发审批；workspace-write：工作区内直写、
+  越区升级才问；danger-full-access：全放行零审批（三档均真机闭环）。
+- **档位随会话创建固化**：会话创建即写 `permission/preset`、`sandbox/mode`、
+  `approval/policy`；切档需重启 App（env 启动期）且只影响新会话。
+- **完全不答审批 → turn 无限挂起**（failopen 探针实测 10+ 分钟无决定、文件不落盘），
+  非工具 failed；服务端无自动放行。
 - 该 profile 下 `bash` 工具存在但必然失败（无 exec），属平台限制。
 
 ## 5. 平台硬约束（六条，各有对策）
@@ -148,7 +156,12 @@ ACP 实测契约（勿凭直觉改）：
   测试构建）：initialize / session/new / set_config_option / prompt（审批 `allow-once` 放行
   后工具真实落盘）/ cancel（通知）/ 断线重连 / close / list / resume 全部实机通过；新发现
   set_config_option 选项集收缩契约（§4.2）。详见 `docs/SPIKE-ACP.md` §9。
-  **ArkTS 客户端（AcpClient）与审批 UI 仍未动。**
+- ArkTS ACP 客户端已交付（2026-10-26，手机+平板真机验证）：AcpProtocol/AcpClient + 审批
+  弹窗 + 流式气泡 + usage + 停止（cancel 通知）+ 模型选择器（选项集收缩适配）+ resume
+  降级 + **权限三档选择器**（只读/平衡/宽松；danger-full-access 平板端到端零审批落盘，
+  三档快照写入 session log）。已知待修：审批弹窗渲染进滚动流（应改固定覆盖层）、
+  AcpClient 无断线重连；桥为**单客户端**（新连接 `replacing previous client` 顶掉旧连接，
+  外部探针实验后须重启 App 恢复客户端）。
 - 真机序列号等本地信息只记在本地记忆（`.workbuddy-ai/memory/`，gitignored），**不写进公开仓库**。
 
 签名口径（开源卫生）：

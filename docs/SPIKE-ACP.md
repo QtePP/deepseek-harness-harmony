@@ -98,12 +98,15 @@
     policy: !!js (process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === ...
 ```
 
-实测行为：
+实测行为（dsh 具名预设表：read-only / workspace-write / danger-full-access）：
 
-- `DSH_PERMISSION_MODE=workspace-write`（默认）→ 写文件**不问**，直接完成（连写 `/tmp/outside-spike.txt` 也放行）
-- `DSH_PERMISSION_MODE=read-only` → 写文件**触发** `session/request_permission`
+- `DSH_PERMISSION_MODE=workspace-write`（默认）→ 工作区内直写**不问**；越区升级触发 `session/request_permission`
+- `DSH_PERMISSION_MODE=read-only` → 裸写先被沙箱拒（`file access denied under read-only mode`，
+  无审批请求），agent 带 `sandbox_permissions:"workspace-write"`+`justification` 重试才触发审批
+- `DSH_PERMISSION_MODE=danger-full-access` → 全放行，审批策略 `never`，零弹窗（平板真机闭环）
 
 → bootstrap 暴露 `DSH_PERMISSION_MODE` 即可做成「权限档位」设置项，不必自定义协议。
+档位随会话创建固化（session log 即写 preset/mode/policy），切档只影响新会话。
 
 ---
 
@@ -217,3 +220,18 @@ v4-pro；再切回 v4-flash 被 `-32602 Invalid params: unknown model option` �
 - 客户端把 `-32602` 当「选项已不可用」处理（刷新列表），不是传输错误。
 
 已同步至 `AGENTS.md` §4.2。
+
+### 9.2 审批流客户端闭环与权限三档（2026-10-26）
+
+App 客户端真机验证（手机 read-only 多轮 + 平板 danger-full-access 端到端），新契约：
+
+- **升级审批流**：read-only 会话裸写 → 沙箱即时拒绝（附 escalation 提示，无审批请求）→
+  agent 重试带 `sandbox_permissions`+`justification` → `session/request_permission`
+  （reason=`escalate sandbox to workspace-write: ...`）→ 客户端应答 → 落盘。
+- **档位快照**：会话创建即写 `permission/preset`/`sandbox/mode`/`approval/policy`，
+  旧会话不随 env 变化；切档需重启 App 且仅新会话生效。
+- **不答 = turn 无限挂起**：failopen 探针（外部连桥、故意不答）100s+ / 10+ 分钟无决定、
+  文件不落盘；服务端无自动放行。
+- **桥是单客户端**：新连接 `replacing previous client` 顶掉旧连接——外部探针实验后必须
+  重启 App 恢复客户端连接（AcpClient 暂无重连）。
+- 已知 UI 缺陷：审批弹窗渲染进 transcript 滚动流，自动滚动可将其推出视口（应改固定覆盖层）。
