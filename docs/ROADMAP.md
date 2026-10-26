@@ -98,17 +98,17 @@ hdc shell aa start -a EntryAbility -b com.example.dshharmony
 
 ### 2.1 后端切到 ACP profile
 
-- **改哪里**：`host/bootstrap.cjs` 的 `--profile sdk` → `acp`；`model/DshClient.ets` 的方法与握手
-- **协议差异**（已在依赖里核实方法名）：
-  | 用途 | ACP 方法 |
+- **改哪里**：`host/bootstrap.cjs` 的 `--profile sdk` → `acp`；新建 `model/AcpClient.ets`（**不删** `DshClient.ets`，保留 SDK 回退）
+- **协议差异**（方法名已由 spike 实测校正，详见 `docs/SPIKE-ACP.md`）：
+  | 用途 | ACP 方法（线上实际字符串） |
   |---|---|
-  | 建会话 | `session/new` |
+  | 建会话 | `session/new`（sessionId **服务端生成**） |
   | 发消息 | `session/prompt` |
   | 取消 | `session/cancel` |
-  | 列/载会话 | `session/list`、`session/load` |
-  | 切模型/模式 | `session/set_model`、`session/set_mode` |
+  | 列/恢复会话 | `session/list`、`session/resume` |
+  | 切模型/推理强度 | `session/setConfigOption`（`model`、`reasoning_effort`） |
   | 流式更新 | 通知 `session/update`（`agent_message_chunk` / `agent_thought_chunk` / `tool_call` / `tool_call_update` / `usage_update`） |
-  | 权限 | 服务端反向请求 `session/request_permission` |
+  | 权限 | 服务端请求 **`session/request_permission`**，选项固定 `allow-once` / `reject-once` |
 - **验收**：能收到 `agent_message_chunk`（流式）、能弹出并回答权限请求、能取消
 - **风险**：ACP 明确不提供 plan / goal / todo / elicitation / 终端视图——这些功能要另做
 

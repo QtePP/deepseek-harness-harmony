@@ -24,7 +24,7 @@
 | **Payload / 载荷** | `dsh-payload.zip`（≈156MB）：dsh 及其依赖打进 HAP rawfile，首启解包到沙箱 | `scripts/assemble-payload.mjs`、`entry/.../host/Payload.ets` |
 | **Bridge / 桥** | 127.0.0.1:4517 回环 TCP，承载 newline-delimited JSON-RPC 2.0；bootstrap 把 socket 伪装成 dsh 的 stdio | `host/bootstrap.cjs`、`entry/.../model/DshClient.ets` |
 | **Host 层** | 把 Node 拉进鸿蒙进程的适配层：NAPI dlopen `libnode.so` + `node::Start` | `entry/.../host/NodeHost.ets`、`@fellow99/node-bridge` |
-| **Profile SDK / ACP** | dsh 两条程序接口。ACP = stdio 子进程（鸿蒙禁 fork/exec，出局）；SDK = JSON-RPC、流可注入（本仓库选择） | `docs/ARCHITECTURE.md` |
+| **Profile SDK / ACP** | dsh 两条程序接口，都是 stdio 上的换行 JSON-RPC、流均可注入。**SDK**：5 个方法，默认路径，真机验收过。**ACP**：9 个方法 + 流式 update + 服务端发起审批，进程内可跑（spike 已证），`DSH_PROFILE=acp` opt-in、尚未真机验收。出局的只是「宿主 spawn dsh」，不是 ACP 本身 | `host/bootstrap.cjs`、`docs/SPIKE-ACP.md` |
 | **Session / 会话** | 客户端生成 UUID 作 id；服务端持久日志 `session.v4.jsonl.zstd`（按初始化 cwd 的 slug 存放，id 全局可查）；本地 `SessionStore` 只存 UI 索引与消息缓存（最近 200 条） | `entry/.../model/ChatModel.ets` |
 | **Project / 项目** | 对话分类：命名桶 + 独立 workspace；`default` 为默认项目，兼容全部历史会话与旧路径 | `entry/.../model/ProjectModel.ets` |
 | **Workspace** | 默认项目 = `filesDir/workspace`（initialize 的 cwd，向后兼容）；其他项目 = `filesDir/workspaces/<projectId>` | `ProjectStore.workspaceDir()` |
@@ -37,11 +37,19 @@
 ## 3. 架构口径（四层关系）
 
 1. **依赖**：AI 能力 100% 来自 npm dsh；`assemble-payload.mjs` 装配为载荷随 HAP 分发。
-2. **运行**：同进程内嵌，不是子进程——ACP 出局；SDK profile + stdio 劫持（TCP 冒充 stdio，dsh 无感知）。
+2. **运行**：同进程内嵌，不是子进程。出局的只是「宿主 spawn dsh」这一形态（禁 fork/exec）；
+   **ACP 服务器本身进程内可跑**（2026-10-26 spike 实测：PassThrough 劫持 stdio + `runCli()`，
+   零 spawn，`docs/SPIKE-ACP.md`）。当前**默认仍是 SDK**，`DSH_PROFILE=acp` 为 opt-in，
+   ACP 尚未真机验收。
 3. **集成点**：全部集中在 `host/` 适配层（bootstrap / fetch-shim / undici 别名 / 装配期补丁），不改 dsh 源码。
 4. **版本耦合**：协议契约是实测所得（2026-10-25），写死在 `DshClient.ets`；dsh 升级若改协议，此处假设即失效。
 
 ## 4. 协议口径（以 `model/Protocol.ets` + `DshClient.ets` 为准）
+
+**两条 profile 并存**：`DSH_PROFILE=sdk`（默认，真机验收过）/ `acp`（opt-in，仅本地桥验证）。
+桥本身与 profile 无关——两者都是 newline-delimited JSON-RPC over stdio，差异在方法集。
+
+### 4.1 SDK profile（默认路径）
 
 客户端 → 服务端 **5 个请求**：
 
@@ -62,6 +70,35 @@
 - 空 `reasoning` 块很常见，渲染必须跳过。
 - 会话打开策略（`Index.ensureSessionOpen`）：先 `resume`（"not found" 静默落新建路径）；
   非默认项目在首次 prompt 前先 `working-directory/set` 指向项目 workspace。
+
+### 4.2 ACP profile（`DSH_PROFILE=acp`，opt-in）
+
+客户端 → 服务端：
+
+| 方法 | 语义 |
+|---|---|
+| `initialize` | `{protocolVersion:1, clientCapabilities}`；**可重复调用**（重连后再发一次不会报错） |
+| `session/new` | `{cwd, mcpServers}` → **服务端生成 sessionId** + `configOptions` |
+| `session/list` | 只返回**已关闭/已持久化**的会话；活跃会话不在其中 |
+| `session/resume` | `{sessionId, cwd, mcpServers}`；**对活跃会话报 `session is already active`** |
+| `session/close` | 关闭后该会话才进入 `session/list`，之后可 resume |
+| `session/setConfigOption` | 改 `configOptions`（`model`、`reasoning_effort`） |
+| `session/prompt` | `{sessionId, prompt:[{type:'text',text}]}` → `{stopReason}` |
+| `session/cancel` | 取消当前轮 |
+
+服务端 → 客户端：通知 `session/update`（`agent_message_chunk` / `agent_thought_chunk` /
+`tool_call` / `tool_call_update` / `usage_update`），以及**服务端发起的请求**
+`session/request_permission`（**snake_case，不是 ACP 规范的 `requestPermission`**）。
+
+ACP 实测契约（勿凭直觉改）：
+
+- 审批选项固定两键：`allow-once` / `reject-once`，应答
+  `{outcome:{outcome:'selected', optionId:'allow-once'}}`；答错/空应答 → 工具 `failed`（fail-closed）。
+- **断线重连**：桥保持流不关闭，重连后 `initialize` 幂等，**直接对旧 sessionId 发 prompt 即可**；
+  不要 resume（会撞 `already active`）。
+- `configOptions` 是模型列表的权威来源，客户端不要硬编码模型。
+- 审批档位由 `DSH_PERMISSION_MODE` 决定（默认 `workspace-write` 不问；`read-only` 才触发审批）。
+- 该 profile 下 `bash` 工具存在但必然失败（无 exec），属平台限制。
 
 ## 5. 平台硬约束（六条，各有对策）
 
@@ -92,6 +129,10 @@
   `WebAssembly is not defined` unhandled rejection（与旧可用版本同类，不致命）。
 - ACP 切换（Stage 1）已过 spike（`docs/SPIKE-ACP.md`，workbuddy）：进程内 PassThrough 劫持
   stdio + `runCli()` 零 spawn 可行；审批线上方法名 `session/request_permission`（snake_case）。
+- `feature/acp` 分支（workbuddy，2026-10-26）：`host/bootstrap.cjs` 引入 `DSH_PROFILE`
+  开关（默认 `sdk`，未改动 SDK 路径），`bridge-status.json` 增加 `profile` 字段；两个 profile
+  均通过本地桥 smoke（sdk `initialize → serverInfo`；acp `initialize + session/new → sessionId`）。
+  断线重连契约已实测并写入 §4.2。**ArkTS 客户端与审批 UI 未动，ACP 未真机验收。**
 - 真机序列号等本地信息只记在本地记忆（`.workbuddy-ai/memory/`，gitignored），**不写进公开仓库**。
 
 签名口径（开源卫生）：

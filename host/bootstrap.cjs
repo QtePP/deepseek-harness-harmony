@@ -31,6 +31,23 @@ const DSH_HOME = process.env.DSH_HOME || path.join(path.dirname(PAYLOAD_ROOT), '
 const STATUS_FILE = path.join(DSH_HOME, 'bridge-status.json')
 const LOG_FILE = path.join(DSH_HOME, 'bridge.log')
 
+/**
+ * Which dsh program interface to mount. `sdk` is the default and the only one
+ * with device sign-off; `acp` is opt-in for the ACP migration
+ * (docs/SPIKE-ACP.md) and has NOT been verified on device yet.
+ *
+ * Both speak newline-delimited JSON-RPC over stdio, so the bridge does not care
+ * which one is mounted — the client does, because the method sets differ:
+ *
+ *   sdk: initialize / session/prompt / session/resume /
+ *        session/working-directory/set / shutdown
+ *   acp: initialize / session/new / session/list / session/resume /
+ *        session/close / session/setConfigOption / session/prompt /
+ *        session/cancel  (+ notifications session/update, and the server-issued
+ *        request `session/request_permission`)
+ */
+const PROFILE = process.env.DSH_PROFILE === 'acp' ? 'acp' : 'sdk'
+
 let booted = false
 let client = null
 let bootError = null
@@ -89,6 +106,7 @@ function log(line) {
 function writeStatus(state, extra) {
   const body = {
     state,
+    profile: PROFILE,
     port: PORT,
     pid: process.pid,
     node: process.version,
@@ -226,10 +244,10 @@ async function boot() {
     return
   }
 
-  // The CLI parses process.argv; present it as a normal `dsh --profile sdk`.
+  // The CLI parses process.argv; present it as a normal `dsh --profile <name>`.
   // An optional patch file lets a deployment disable rows that cannot work on
   // this platform (native addons, Windows-only helpers) without touching code.
-  const argv = [process.execPath, bin, '--profile', process.env.DSH_PROFILE || 'sdk']
+  const argv = [process.execPath, bin, '--profile', PROFILE]
   const patch = process.env.DSH_PATCH_FILE
   if (patch && fs.existsSync(patch)) {
     argv.push('--patch', patch)
@@ -254,7 +272,9 @@ async function boot() {
     }
     await entry.runCli()
     writeStatus('running')
-    log('boot: sdk runtime mounted')
+    // runCli resolves once the profile is mounted (verified for both profiles:
+    // the ACP server keeps its own loop alive after the mount promise settles).
+    log(`boot: ${PROFILE} runtime mounted`)
     startDebugChmod()
   } catch (error) {
     bootError = error
