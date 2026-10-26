@@ -82,9 +82,9 @@
 | `session/list` | 只返回**已关闭/已持久化**的会话；活跃会话不在其中 |
 | `session/resume` | `{sessionId, cwd, mcpServers}`；**对活跃会话报 `session is already active`** |
 | `session/close` | 关闭后该会话才进入 `session/list`，之后可 resume |
-| `session/setConfigOption` | 改 `configOptions`（`model`、`reasoning_effort`） |
-| `session/prompt` | `{sessionId, prompt:[{type:'text',text}]}` → `{stopReason}` |
-| `session/cancel` | 取消当前轮 |
+| `session/prompt` | `{sessionId, prompt:[{type:'text',text}]}` → `{stopReason}`（`end_turn` / `cancelled`） |
+| `session/set_config_option` | `{sessionId, configId, value}` → 返回**更新后的 configOptions**。`configId` 取 `model` / `reasoning_effort` |
+| `session/cancel` | **通知，不是请求**（无 `id`，无响应）。发出后当前轮的 `session/prompt` 响应变为 `{stopReason:"cancelled"}` |
 
 服务端 → 客户端：通知 `session/update`（`agent_message_chunk` / `agent_thought_chunk` /
 `tool_call` / `tool_call_update` / `usage_update`），以及**服务端发起的请求**
@@ -94,6 +94,11 @@ ACP 实测契约（勿凭直觉改）：
 
 - 审批选项固定两键：`allow-once` / `reject-once`，应答
   `{outcome:{outcome:'selected', optionId:'allow-once'}}`；答错/空应答 → 工具 `failed`（fail-closed）。
+- **方法名全部是 snake_case，不要按 ACP 规范猜 camelCase**：`session/setConfigOption`、
+  `session/set_model`、`session/set_mode` 实测均 `Method not found`；`session/cancel` 若作为
+  **请求**（带 id）发送同样是 `Method not found`，它是通知。
+- `session/set_config_option` 的 `value` 对 `model` 是**JSON 数组字符串**
+  （`'["deepseek-official","deepseek-v4-pro"]'`），不是对象；传错会静默不改。
 - **断线重连**：桥保持流不关闭，重连后 `initialize` 幂等，**直接对旧 sessionId 发 prompt 即可**；
   不要 resume（会撞 `already active`）。
 - `configOptions` 是模型列表的权威来源，客户端不要硬编码模型。

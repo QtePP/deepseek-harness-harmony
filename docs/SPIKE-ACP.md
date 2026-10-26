@@ -23,8 +23,8 @@
 | 审批 | **`session/request_permission`** | ✅ | 见 §2 |
 | 审批放行后工具继续 | — | ✅ | 答 `allow-once` 后 `tool_call_update: status=completed` |
 | 审批答错即失败 | — | ✅ | 回 `{}` 时 `status=failed`（fail-closed，不是 hang） |
-| 取消 | `session/cancel` | ⚠️ 未测 | 本轮没构造长任务 |
-| 切配置 | `session/setConfigOption` | ⚠️ 未测 | 但 `configOptions` 已确认存在（见 §3），方法名按 ACP 规范 |
+| 取消 | `session/cancel`（**通知，无 id**） | ✅ | 发出后 prompt 响应 `{"stopReason":"cancelled"}`，之后 0 条 update；作为**请求**发送则 `Method not found` |
+| 切配置 | `session/set_config_option` | ✅ | `setConfigOption` / `set_model` / `set_mode` 均 `Method not found`；`model` 的 value 是 JSON 数组字符串 |
 | 真机（arm64/jitless） | — | ⚠️ 未测 | 本 spike 只在桌面 Node 22 上跑 |
 
 ---
@@ -69,7 +69,18 @@
 | `model` | `model` | `["deepseek-official","deepseek-v4-flash"]` | deepseek-v4-flash / deepseek-flash（DeepSeek-V4.1-Flash）/ deepseek-v4-pro |
 | `reasoning_effort` | `thought_level` | `high` | off / low / … / high |
 
-→ 客户端不要再硬编码模型；直接渲染 `configOptions`，用 `session/setConfigOption` 改。
+→ 客户端不要再硬编码模型；直接渲染 `configOptions`，用 **`session/set_config_option`**
+（`{sessionId, configId, value}`）改，响应里带回新的 `configOptions`。
+
+**value 的格式是个坑**：`model` 的 `value` 是 **JSON 数组字符串**，不是对象——
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"session/set_config_option","params":{
+  "sessionId":"…","configId":"model","value":"[\"deepseek-official\",\"deepseek-v4-pro\"]"}}
+```
+
+实测把 `value` 传成对象或只传模型名，调用会返回 200 但 `currentValue` 不变（静默失败）。
+传上面的字符串后 `currentValue` 确实变为 `["deepseek-official","deepseek-v4-pro"]`。
 
 ---
 
@@ -122,10 +133,15 @@
 
 | 旧说法 | 实际 | 出处 |
 |---|---|---|
-| `session/set_model` | `session/setConfigOption`（model 是其中一个 config） | §3 |
+| `session/set_model` | `session/set_config_option`（model 是其中一个 config） | §3 |
+| `session/setConfigOption`（camelCase） | `session/set_config_option`（snake_case）；camelCase 报 `Method not found` | §3 |
 | `session/load` | `session/resume` | §1 |
 | `session/requestPermission` | `session/request_permission` | §2 |
+| `session/cancel` 当请求发 | 它是**通知**（无 id）；当请求发报 `Method not found` | §1 |
 | 「ACP 出局（需子进程）」 | 仅「宿主 spawn dsh」出局；ACP 服务器进程内可跑 | 本 spike 全程无 spawn |
+
+> 教训：**这个实现的线上方法名全是 snake_case**，凡按 ACP 规范猜 camelCase 的都会 `Method not found`。
+> 后续接任何新方法，先发一枪再写进客户端。
 
 ---
 
