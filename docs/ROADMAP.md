@@ -23,10 +23,12 @@
 
 **本轮修掉的两个真实缺陷**：
 
-1. **补丁打过头**：早期 `ohos.patch.yml` 禁用了 `subprocess` 和 `tool-bash`，导致
-   `permission`（权限门）、`tool-fs-search`、`ptc-runtime`、`workflow` 共 5 个插件未激活。
+1. **补丁打过头**：早期 `ohos.patch.yml` 同时禁用了 `subprocess`、`bash-sandbox`、`tool-bash`，
+   导致 `permission`（权限门）、`tool-fs-search`、`ptc-runtime`、`workflow` 共 5 个插件未激活。
    本地对比实验：不加补丁 0 未激活，加旧补丁 5 未激活。收窄补丁后**真机日志确认 0 未激活**。
    → 原则：**只禁用户级工具，不动服务级行**。
+   → 2026-10-26 补测：单独禁 `tool-bash` 是安全的（0 未激活，permission 正常）；罪魁是
+   `subprocess`（带走 fs-search/ptc/workflow）与 `bash-sandbox`（带走 `shell` 服务）。
 2. **fetch shim 自触发内置 undici**：`install()` 里 `typeof globalThis.fetch` 和给
    `Headers/Response/Request` 赋值会materialize Node 的惰性 web 全局，进而初始化内置 undici
    （llhttp 是 WASM）→ `ReferenceError: WebAssembly is not defined`。

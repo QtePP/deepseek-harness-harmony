@@ -3,8 +3,10 @@
 # 原则：只禁用「调用即失败」的用户级工具，不动服务级行。
 # 禁用服务行会连带打掉依赖它的能力，实测代价：
 #   · 禁 subprocess → tool-fs-search / ptc-runtime / workflow-ptc / tool-workflow 全部 pending
-#   · 禁 tool-bash  → shell 服务缺失 → permission-presets pending（权限门失效，属安全降级）
-# 本地对比：不加补丁 0 个未激活；早期版本禁用 subprocess + tool-bash 后 5 个未激活。
+# 单独禁 tool-bash 是安全的（2026-10-26 复测：仅 tool-bash disabled → 0 个未激活，
+# permission-presets 正常激活）；此前"禁 tool-bash 会打掉 permission"的结论是被
+# 同时禁用的 bash-sandbox/subprocess 混淆了。
+# 本地对比：不加补丁 0 个未激活；早期版本禁用 subprocess + tool-bash + bash-sandbox 后 5 个未激活。
 #
 # 启用方式：复制为 ohos.patch.yml 后重新装配载荷。
 # 核对行 id：node node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --dump-config
