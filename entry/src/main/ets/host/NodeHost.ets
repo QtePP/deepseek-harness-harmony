@@ -4,6 +4,7 @@ import { NodeRuntime, NodeRuntimeOptions, NodeStartResult, NodeState } from '@fe
 import { Payload } from './Payload'
 import { AppConfig } from '../common/AppConfig'
 import { DshClient } from '../model/DshClient'
+import { AcpClient } from '../model/AcpClient'
 
 /** Boot progress surfaced by the splash screen. */
 export enum BootPhase {
@@ -35,12 +36,18 @@ export class NodeHost {
   phase: BootPhase = BootPhase.IDLE
   detail: string = ''
   client: DshClient = new DshClient()
+  acp: AcpClient = new AcpClient()
   private runtime: NodeRuntime = NodeRuntime.getInstance()
   private payloadRoot: string = ''
   private booting: boolean = false
 
   static get(): NodeHost {
     return NodeHost.instance
+  }
+
+  /** ACP is opt-in through Settings; SDK remains the default profile. */
+  isAcp(): boolean {
+    return AppConfig.profile === AppConfig.PROFILE_ACP
   }
 
   isBooting(): boolean {
@@ -108,7 +115,9 @@ export class NodeHost {
             TMPDIR: tmp,
             HOME: context.filesDir,
             DSH_PATCH_FILE: hasPatch ? patchPath : '',
-            DSH_USER_PATCH_FILE: hasUserPatch ? userPatchPath : ''
+            DSH_USER_PATCH_FILE: hasUserPatch ? userPatchPath : '',
+            DSH_PROFILE: AppConfig.profile,
+            DSH_PERMISSION_MODE: AppConfig.permissionMode
           },
           onStateChange: (state: NodeState, note?: string) => {
             if (state === NodeState.FAILED) {
@@ -138,9 +147,17 @@ export class NodeHost {
       await this.connectBridge()
 
       publish(BootPhase.WAITING, '与 dsh 会话服务握手…')
-      const info = await this.client.initialize(workspace, AppConfig.PROVIDER, AppConfig.model)
-      const server = info.serverInfo
-      publish(BootPhase.READY, server === undefined ? '就绪' : `${server.name} ${server.version}`)
+      if (this.isAcp()) {
+        // ACP handshake is idempotent: a later retry may safely repeat it.
+        const info = await this.acp.initialize()
+        const agent = info.agentInfo
+        const label = agent === undefined ? '就绪' : `${agent.name === undefined ? '' : agent.name} ${agent.version === undefined ? '' : agent.version}`.trim()
+        publish(BootPhase.READY, label.length === 0 ? '就绪' : label)
+      } else {
+        const info = await this.client.initialize(workspace, AppConfig.PROVIDER, AppConfig.model)
+        const server = info.serverInfo
+        publish(BootPhase.READY, server === undefined ? '就绪' : `${server.name} ${server.version}`)
+      }
     } catch (error) {
       const failure = error as Error
       const stage = this.runtime.getStage()
@@ -160,7 +177,11 @@ export class NodeHost {
     let lastError: Error = new Error('bridge unreachable')
     for (let attempt = 0; attempt < 8; attempt++) {
       try {
-        await this.client.connect(AppConfig.BRIDGE_PORT)
+        if (this.isAcp()) {
+          await this.acp.connect(AppConfig.BRIDGE_PORT)
+        } else {
+          await this.client.connect(AppConfig.BRIDGE_PORT)
+        }
         return
       } catch (error) {
         lastError = error as Error

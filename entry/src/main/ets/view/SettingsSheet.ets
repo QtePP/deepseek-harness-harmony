@@ -1,16 +1,22 @@
 import { PluginRow } from '../model/PluginCatalog'
+import { AppConfig } from '../common/AppConfig'
 
 /** Settings sheet: credentials, model route, capability toggles, diagnostics. */
 @Component
 export struct SettingsSheet {
   @State apiKey: string = ''
   @State model: string = ''
+  @State profile: string = 'sdk'
+  @State permissionMode: string = 'workspace-write'
   @State showDiagnostics: boolean = false
   @Prop initialKey: string = ''
   @Prop initialModel: string = ''
+  @Prop initialProfile: string = 'sdk'
+  @Prop initialPermission: string = 'workspace-write'
   @Prop diagnostics: string = ''
   @Prop pluginRows: PluginRow[] = []
   onSave: (key: string, model: string) => void = () => {}
+  onProfileChange: (profile: string, permissionMode: string) => void = () => {}
   onRefreshDiagnostics: () => void = () => {}
   onResetPayload: () => void = () => {}
   onTogglePlugin: (id: string, enabled: boolean) => void = () => {}
@@ -18,6 +24,18 @@ export struct SettingsSheet {
   aboutToAppear(): void {
     this.apiKey = this.initialKey
     this.model = this.initialModel
+    this.profile = this.initialProfile === 'acp' ? 'acp' : 'sdk'
+    this.permissionMode = AppConfig.normalizePermissionMode(this.initialPermission)
+  }
+
+  private permissionHint(mode: string): string {
+    if (mode === AppConfig.PERMISSION_READONLY) {
+      return '只读：写入先被沙箱拒绝，智能体申请升级后弹审批'
+    }
+    if (mode === AppConfig.PERMISSION_DANGER) {
+      return '宽松：完全访问，不再弹任何审批'
+    }
+    return '平衡：工作区内直接读写，越区升级弹审批（默认）'
   }
 
   build() {
@@ -50,6 +68,80 @@ export struct SettingsSheet {
             .onChange((value: string) => {
               this.model = value
             })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+
+        Column({ space: 6 }) {
+          Text('对话协议（实验）').fontSize(12).fontColor($r('app.color.text_secondary'))
+          Row({ space: 8 }) {
+            Button('SDK（默认）')
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.profile === 'sdk' ? $r('app.color.brand') : $r('app.color.surface_muted'))
+              .fontColor(this.profile === 'sdk' ? Color.White : $r('app.color.text_primary'))
+              .onClick(() => {
+                this.profile = 'sdk'
+                this.onProfileChange(this.profile, this.permissionMode)
+              })
+            Button('ACP（流式/审批/取消）')
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.profile === 'acp' ? $r('app.color.brand') : $r('app.color.surface_muted'))
+              .fontColor(this.profile === 'acp' ? Color.White : $r('app.color.text_primary'))
+              .onClick(() => {
+                this.profile = 'acp'
+                this.onProfileChange(this.profile, this.permissionMode)
+              })
+          }
+          .width('100%')
+
+          Text('权限模式（参考 dsh 预设）').fontSize(12).fontColor($r('app.color.text_secondary'))
+
+          Row({ space: 8 }) {
+            Button('只读')
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.permissionMode === AppConfig.PERMISSION_READONLY ?
+                $r('app.color.brand') : $r('app.color.surface_muted'))
+              .fontColor(this.permissionMode === AppConfig.PERMISSION_READONLY ?
+                Color.White : $r('app.color.text_primary'))
+              .onClick(() => {
+                this.permissionMode = AppConfig.PERMISSION_READONLY
+                this.onProfileChange(this.profile, this.permissionMode)
+              })
+            Button('平衡')
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.permissionMode === AppConfig.PERMISSION_WORKSPACE ?
+                $r('app.color.brand') : $r('app.color.surface_muted'))
+              .fontColor(this.permissionMode === AppConfig.PERMISSION_WORKSPACE ?
+                Color.White : $r('app.color.text_primary'))
+              .onClick(() => {
+                this.permissionMode = AppConfig.PERMISSION_WORKSPACE
+                this.onProfileChange(this.profile, this.permissionMode)
+              })
+            Button('宽松')
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.permissionMode === AppConfig.PERMISSION_DANGER ?
+                $r('app.color.brand') : $r('app.color.surface_muted'))
+              .fontColor(this.permissionMode === AppConfig.PERMISSION_DANGER ?
+                Color.White : $r('app.color.text_primary'))
+              .onClick(() => {
+                this.permissionMode = AppConfig.PERMISSION_DANGER
+                this.onProfileChange(this.profile, this.permissionMode)
+              })
+          }
+          .width('100%')
+
+          Text(this.permissionHint(this.permissionMode))
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+
+          Text('协议与权限档位由启动期环境变量决定：切换后需彻底退出并重新打开应用才会生效（Node 每进程仅启动一次）；档位在会话创建时固化，重启后仅新会话生效。ACP 会话的服务端 id 与 SDK 会话互不通用。')
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
         }
         .alignItems(HorizontalAlign.Start)
         .width('100%')

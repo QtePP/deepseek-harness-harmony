@@ -7,6 +7,10 @@ import { ChatMessage, Role, SessionStore, SessionSummary, newSessionId, titleOf 
 import { ProjectStore, ProjectSummary } from '../model/ProjectModel'
 import { renderBlocks, RenderedBlock } from '../model/DshClient'
 import { EventLike, SessionEventPayload, SessionStatusPayload } from '../model/Protocol'
+import {
+  AcpConfigOption, AcpModelChoice, AcpPermissionRequest, AcpSessionNewResult, AcpSetConfigResult,
+  AcpUpdatePayload, findConfigOption, flattenChoices
+} from '../model/AcpProtocol'
 import { BootView } from '../view/BootView'
 import { ChatView, FileRef } from '../view/ChatView'
 import { FileViewer } from '../view/FileViewer'
@@ -42,6 +46,12 @@ struct Index {
   @State pluginRows: PluginRow[] = []
   @State projects: ProjectSummary[] = []
   @State currentProjectId: string = ProjectStore.DEFAULT_ID
+  @State showModelPicker: boolean = false
+  @State modelLabel: string = ''
+  @State showModelSheet: boolean = false
+  @State modelChoices: AcpModelChoice[] = []
+  @State approvalVisible: boolean = false
+  @State approvalText: string = ''
 
   private host: NodeHost = NodeHost.get()
   private store: SessionStore = new SessionStore()
@@ -51,6 +61,12 @@ struct Index {
   private openedSessions: Set<string> = new Set<string>()
   /** In-flight session opens, deduped per id. */
   private openingSessions: Map<string, Promise<void>> = new Map<string, Promise<void>>()
+  /** Server approval waiting for the user; null once answered. */
+  private approvalRequest: AcpPermissionRequest | null = null
+  /** Live assistant bubble being filled by streaming chunks. */
+  private liveAssistant: ChatMessage | null = null
+  /** Current model config value (JSON array string on the wire). */
+  private currentModelValue: string = ''
 
   aboutToAppear(): void {
     void this.init()
@@ -77,7 +93,17 @@ struct Index {
         this.running = payload.status === 'running'
       }
     }
+    this.host.acp.onUpdate = (payload: AcpUpdatePayload) => {
+      this.handleAcpUpdate(payload)
+    }
+    this.host.acp.onPermission = (request: AcpPermissionRequest) => {
+      this.handleAcpPermission(request)
+    }
     await this.boot()
+    // ACP session ids come from the server: a fresh app start with no
+    // persisted conversation opens one immediately so the first prompt and
+    // the model picker have a live session to target.
+    await this.ensureAcpCurrentSession()
   }
 
   /** Cold start / project switch: open the most recent conversation of the current project. */
@@ -239,6 +265,10 @@ struct Index {
   }
 
   private async send(text: string): Promise<void> {
+    if (this.host.isAcp()) {
+      await this.sendAcp(text)
+      return
+    }
     if (this.messages.length === 0) {
       this.title = titleOf(text)
     }
@@ -255,8 +285,258 @@ struct Index {
     }
   }
 
+  /**
+   * ACP session ids are minted by the server, so an empty conversation needs
+   * one allocated before the first prompt. Runs after boot and after project
+   * switches; conversations restored from the store keep their server id and
+   * resume lazily on first send instead.
+   */
+  private async ensureAcpCurrentSession(): Promise<void> {
+    if (!this.host.isAcp() || this.phase !== BootPhase.READY) {
+      return
+    }
+    if (this.openedSessions.has(this.currentId) || this.messages.length > 0) {
+      return
+    }
+    const created = await this.createAcpSession()
+    if (created.length > 0) {
+      this.currentId = created
+    }
+  }
+
+  /** Allocate a server-owned session rooted at the project workspace. */
+  private async createAcpSession(): Promise<string> {
+    if (this.context === null) {
+      return ''
+    }
+    const cwd = ProjectStore.workspaceDir(this.context, this.currentProjectId)
+    if (this.currentProjectId !== ProjectStore.DEFAULT_ID) {
+      ProjectStore.ensureWorkspace(this.context, this.currentProjectId)
+    }
+    try {
+      const result = await this.host.acp.sessionNew(cwd)
+      const sessionId = result.sessionId === undefined ? '' : result.sessionId
+      if (sessionId.length === 0) {
+        throw new Error('session/new 未返回 sessionId')
+      }
+      this.openedSessions.add(sessionId)
+      this.applyAcpConfig(result)
+      return sessionId
+    } catch (error) {
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `新建会话失败：${(error as Error).message}`, '错误'))
+      return ''
+    }
+  }
+
+  /**
+   * Make the server own the current session before prompting it. Resumed
+   * sessions replay their server-side context; `already active` (reconnect)
+   * counts as loaded; an id the server never saw is replaced by a fresh
+   * session so the conversation can continue, at the cost of its context.
+   */
+  private async ensureAcpSession(): Promise<void> {
+    if (this.context === null || this.openedSessions.has(this.currentId)) {
+      return
+    }
+    const cwd = ProjectStore.workspaceDir(this.context, this.currentProjectId)
+    try {
+      const restored = await this.host.acp.sessionResume(this.currentId, cwd)
+      this.openedSessions.add(this.currentId)
+      this.applyAcpConfig(restored)
+      return
+    } catch (error) {
+      const message = (error as Error).message
+      if (message.includes('already active')) {
+        this.openedSessions.add(this.currentId)
+        return
+      }
+    }
+    const created = await this.createAcpSession()
+    if (created.length === 0) {
+      return
+    }
+    this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+      '原会话上下文在服务端不可用，已新开会话继续（历史消息仍在下方）。', '会话'))
+    this.currentId = created
+  }
+
+  /** One ACP turn: stream chunks into a live bubble, settle on stopReason. */
+  private async sendAcp(text: string): Promise<void> {
+    if (this.messages.length === 0) {
+      this.title = titleOf(text)
+    }
+    this.append(new ChatMessage(newSessionId(), Role.USER, text, ''))
+    void this.persist()
+    await this.ensureAcpSession()
+    this.running = true
+    this.liveAssistant = null
+    try {
+      const result = await this.host.acp.sessionPrompt(this.currentId, text)
+      this.running = false
+      this.liveAssistant = null
+      const stop = result.stopReason === undefined ? '' : result.stopReason
+      if (stop === 'cancelled') {
+        this.append(new ChatMessage(newSessionId(), Role.SYSTEM, '本轮已取消', '取消'))
+      } else if (stop !== 'end_turn' && stop.length > 0) {
+        this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `回合结束：${stop}`, '结束'))
+      }
+      void this.persist()
+    } catch (error) {
+      this.running = false
+      this.liveAssistant = null
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `发送失败：${(error as Error).message}`, '错误'))
+    }
+  }
+
+  /** Render one session/update notification into the transcript. */
+  private handleAcpUpdate(payload: AcpUpdatePayload): void {
+    if (payload.sessionId !== this.currentId) {
+      return
+    }
+    const update = payload.update
+    if (update === undefined) {
+      return
+    }
+    const kind = update.sessionUpdate === undefined ?
+      (update.type === undefined ? '' : update.type) : update.sessionUpdate
+    if (kind === 'agent_message_chunk') {
+      const text = update.content === undefined ? '' : (update.content.text === undefined ? '' : update.content.text)
+      if (text.length === 0) {
+        return
+      }
+      if (this.liveAssistant === null) {
+        const fresh = new ChatMessage(newSessionId(), Role.ASSISTANT, text, '')
+        this.liveAssistant = fresh
+        this.append(fresh)
+      } else {
+        this.liveAssistant.text += text
+      }
+      return
+    }
+    if (kind === 'agent_thought_chunk') {
+      if (this.liveAssistant !== null && this.liveAssistant.note.length === 0) {
+        this.liveAssistant.note = '思考中…'
+      }
+      return
+    }
+    if (kind === 'tool_call') {
+      const title = update.title === undefined ?
+        (update.toolKind === undefined ? '工具调用' : update.toolKind) : update.title
+      this.append(new ChatMessage(newSessionId(), Role.TOOL, title, '工具调用'))
+      return
+    }
+    if (kind === 'tool_call_update') {
+      if (update.status === 'failed') {
+        this.append(new ChatMessage(newSessionId(), Role.TOOL, '工具执行失败', '工具结果'))
+      }
+      return
+    }
+    if (kind === 'usage_update') {
+      if (this.liveAssistant !== null) {
+        const used = update.used === undefined ? 0 : update.used
+        const size = update.size === undefined ? 0 : update.size
+        this.liveAssistant.note = `上下文 ${used}/${size}`
+      }
+    }
+  }
+
+  /** Surface a server approval request; unanswered dialogs fail closed. */
+  private handleAcpPermission(request: AcpPermissionRequest): void {
+    this.approvalRequest = request
+    const payload = request.payload
+    let title = '工具请求'
+    if (payload !== null && payload.toolCall !== undefined && payload.toolCall.title !== undefined &&
+      payload.toolCall.title.length > 0) {
+      title = payload.toolCall.title
+    }
+    this.approvalText = title
+    this.approvalVisible = true
+  }
+
+  private answerApproval(allow: boolean): void {
+    const request = this.approvalRequest
+    this.approvalRequest = null
+    this.approvalVisible = false
+    if (request === null) {
+      return
+    }
+    this.host.acp.respondPermission(request.id, allow ? 'allow-once' : 'reject-once')
+  }
+
+  private stopAcp(): void {
+    if (!this.running) {
+      return
+    }
+    this.host.acp.sessionCancel(this.currentId)
+  }
+
+  /**
+   * Adopt the authoritative configOptions carried by session/new, resume and
+   * set_config_option responses. The option list shrinks as selections are
+   * made, so every response rebuilds the picker; a cached list goes stale.
+   */
+  private applyAcpConfig(result: AcpSessionNewResult): void {
+    const model = findConfigOption(result.configOptions, 'model')
+    if (model === null) {
+      this.showModelPicker = false
+      return
+    }
+    this.modelChoices = flattenChoices(model.options)
+    this.currentModelValue = model.currentValue === undefined ? '' : model.currentValue
+    let label = ''
+    for (const choice of this.modelChoices) {
+      if (choice.value === this.currentModelValue) {
+        label = choice.name
+        break
+      }
+    }
+    this.modelLabel = label.length === 0 ? '模型' : label
+    this.showModelPicker = this.modelChoices.length > 1
+  }
+
+  private async pickModel(choice: AcpModelChoice): Promise<void> {
+    this.showModelSheet = false
+    if (choice.value === this.currentModelValue) {
+      return
+    }
+    if (!this.openedSessions.has(this.currentId)) {
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM, '会话尚未在服务端激活，请先发送一条消息。', '模型'))
+      return
+    }
+    try {
+      const raw = await this.host.acp.setConfigOption(this.currentId, 'model', choice.value)
+      const typed = raw as AcpSetConfigResult
+      const wrapped: AcpSessionNewResult = { configOptions: typed.configOptions }
+      this.applyAcpConfig(wrapped)
+    } catch (error) {
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+        `模型切换失败（该选项可能已不可用）：${(error as Error).message}`, '模型'))
+    }
+  }
+
+  /** Profile and approval tier are boot-time env; persisted for next launch. */
+  private async saveProfileChoice(profile: string, permissionMode: string): Promise<void> {
+    if (this.context === null) {
+      return
+    }
+    await AppConfig.saveRuntimeChoice(this.context, profile, permissionMode)
+  }
+
   private async newSession(): Promise<void> {
     await this.persist()
+    if (this.host.isAcp()) {
+      const created = await this.createAcpSession()
+      if (created.length === 0) {
+        return // failure note already appended
+      }
+      this.currentId = created
+      this.messages = []
+      this.title = '新会话'
+      this.running = false
+      this.liveAssistant = null
+      this.showSessions = false
+      return
+    }
     this.currentId = newSessionId()
     this.messages = []
     this.title = '新会话'
@@ -320,6 +600,7 @@ struct Index {
     await this.projectStore.saveLastSelected(id)
     this.sessions = await this.store.list(id)
     await this.restoreLatest()
+    await this.ensureAcpCurrentSession()
   }
 
   private async createProject(name: string): Promise<void> {
@@ -382,7 +663,8 @@ struct Index {
     const lines: string[] = []
     lines.push(`phase: ${this.phase}`)
     lines.push(`detail: ${this.detail}`)
-    lines.push(`server: ${this.host.client.getServerInfo()}`)
+    lines.push(`server: ${this.host.isAcp() ? this.host.acp.getServerInfo() : this.host.client.getServerInfo()}`)
+    lines.push(`profile: ${AppConfig.profile} (${AppConfig.permissionMode})`)
     lines.push(`crash: ${this.host.crashInfo()}`)
     lines.push('--- bridge ---')
     lines.push(this.host.bridgeStatus(this.context))
@@ -398,10 +680,15 @@ struct Index {
     SettingsSheet({
       initialKey: AppConfig.apiKey,
       initialModel: AppConfig.model,
+      initialProfile: AppConfig.profile,
+      initialPermission: AppConfig.permissionMode,
       diagnostics: this.diagnostics,
       pluginRows: this.pluginRows,
       onSave: (key: string, model: string) => {
         void this.saveSettings(key, model)
+      },
+      onProfileChange: (profile: string, permissionMode: string) => {
+        void this.saveProfileChoice(profile, permissionMode)
       },
       onRefreshDiagnostics: () => this.refreshDiagnostics(),
       onResetPayload: () => {
@@ -505,6 +792,9 @@ struct Index {
                 running: this.running,
                 title: this.title,
                 projectName: this.currentProjectName(),
+                showModelPicker: this.showModelPicker,
+                modelLabel: this.modelLabel,
+                canStop: this.host.isAcp(),
                 onSend: (text: string) => {
                   void this.send(text)
                 },
@@ -515,6 +805,10 @@ struct Index {
                   this.refreshDiagnostics()
                   this.showSettings = true
                 },
+                onPickModel: () => {
+                  this.showModelSheet = true
+                },
+                onStop: () => this.stopAcp(),
                 onOpenFile: (ref: FileRef) => this.openFile(ref)
               })
                 .layoutWeight(1)
@@ -528,6 +822,9 @@ struct Index {
                 running: this.running,
                 title: this.title,
                 projectName: this.currentProjectName(),
+                showModelPicker: this.showModelPicker,
+                modelLabel: this.modelLabel,
+                canStop: this.host.isAcp(),
                 showSessionsEntry: true,
                 onSend: (text: string) => {
                   void this.send(text)
@@ -542,6 +839,10 @@ struct Index {
                 onOpenSessions: () => {
                   this.showSessions = true
                 },
+                onPickModel: () => {
+                  this.showModelSheet = true
+                },
+                onStop: () => this.stopAcp(),
                 onOpenFile: (ref: FileRef) => this.openFile(ref)
               })
             }
@@ -561,6 +862,107 @@ struct Index {
           onDisappear: () => {
             this.showViewer = false
           }
+        })
+      }
+
+      if (this.approvalVisible) {
+        Column() {
+          Column({ space: 12 }) {
+            Text('工具请求审批')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+            Text(this.approvalText)
+              .fontSize(14)
+              .fontColor($r('app.color.text_secondary'))
+            Text('允许后本次工具改动将执行；拒绝则工具按失败处理。')
+              .fontSize(11)
+              .fontColor($r('app.color.text_tertiary'))
+            Row({ space: 10 }) {
+              Button('拒绝')
+                .layoutWeight(1)
+                .backgroundColor($r('app.color.surface_muted'))
+                .fontColor($r('app.color.text_primary'))
+                .onClick(() => this.answerApproval(false))
+              Button('允许')
+                .layoutWeight(1)
+                .onClick(() => this.answerApproval(true))
+            }
+            .width('100%')
+          }
+          .alignItems(HorizontalAlign.Start)
+          .padding(20)
+          .width('86%')
+          .borderRadius(16)
+          .backgroundColor($r('app.color.background'))
+          .onClick(() => {
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor('rgba(0,0,0,0.4)')
+        .onClick(() => this.answerApproval(false))
+      }
+
+      if (this.showModelSheet) {
+        Column() {
+          Column({ space: 12 }) {
+            Text('模型')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+            Scroll() {
+              Column({ space: 4 }) {
+                ForEach(this.modelChoices, (choice: AcpModelChoice) => {
+                  Row({ space: 8 }) {
+                    Column({ space: 2 }) {
+                      Text(choice.name)
+                        .fontSize(14)
+                        .fontColor($r('app.color.text_primary'))
+                      if (choice.description.length > 0) {
+                        Text(choice.description)
+                          .fontSize(11)
+                          .fontColor($r('app.color.text_tertiary'))
+                      }
+                    }
+                    .alignItems(HorizontalAlign.Start)
+                    .layoutWeight(1)
+                    if (choice.value === this.currentModelValue) {
+                      Text('当前')
+                        .fontSize(11)
+                        .fontColor($r('app.color.brand'))
+                    }
+                  }
+                  .width('100%')
+                  .padding({ top: 8, bottom: 8 })
+                  .onClick(() => {
+                    void this.pickModel(choice)
+                  })
+                }, (choice: AcpModelChoice) => choice.value)
+              }
+              .width('100%')
+            }
+            .constraintSize({ maxHeight: 360 })
+            .width('100%')
+            Text('选项列表来自服务端实时返回；切换后部分选项可能不再可用。')
+              .fontSize(11)
+              .fontColor($r('app.color.text_tertiary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .padding(20)
+          .width('86%')
+          .borderRadius(16)
+          .backgroundColor($r('app.color.background'))
+          .onClick(() => {
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor('rgba(0,0,0,0.4)')
+        .onClick(() => {
+          this.showModelSheet = false
         })
       }
     }

@@ -176,6 +176,9 @@ export struct ChatView {
   @Prop running: boolean = false
   @Prop title: string = '新会话'
   @Prop projectName: string = ''
+  @Prop showModelPicker: boolean = false
+  @Prop modelLabel: string = ''
+  @Prop canStop: boolean = false
   @State draft: string = ''
   /** Phones have no rail: show a top-bar entry that opens the sessions sheet. */
   showSessionsEntry: boolean = false
@@ -184,6 +187,8 @@ export struct ChatView {
   onOpenSettings: () => void = () => {}
   onOpenSessions: () => void = () => {}
   onOpenFile: (ref: FileRef) => void = () => {}
+  onPickModel: () => void = () => {}
+  onStop: () => void = () => {}
   private scroller: Scroller = new Scroller()
 
   onCountChange(): void {
@@ -201,6 +206,17 @@ export struct ChatView {
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        if (this.showModelPicker) {
+          Button(this.modelLabel.length > 0 ? this.modelLabel : '模型')
+            .fontSize(13)
+            .height(32)
+            .margin({ right: 8 })
+            .constraintSize({ maxWidth: 120 })
+            .backgroundColor($r('app.color.surface_muted'))
+            .fontColor($r('app.color.text_primary'))
+            .onClick(() => this.onPickModel())
+        }
 
         if (this.showSessionsEntry) {
           Button('会话')
@@ -270,10 +286,18 @@ export struct ChatView {
       if (this.running) {
         Row({ space: 8 }) {
           LoadingProgress().width(16).height(16).color($r('app.color.brand'))
-          Text('dsh 正在执行…').fontSize(12).fontColor($r('app.color.text_secondary'))
+          Text('dsh 正在执行…').fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+          if (this.canStop) {
+            Button('停止')
+              .fontSize(13)
+              .height(30)
+              .backgroundColor($r('app.color.surface_muted'))
+              .fontColor($r('app.color.text_primary'))
+              .onClick(() => this.onStop())
+          }
         }
         .width('100%')
-        .padding({ left: 16, bottom: 4 })
+        .padding({ left: 16, right: 16, bottom: 4 })
         .justifyContent(FlexAlign.Start)
       }
 
