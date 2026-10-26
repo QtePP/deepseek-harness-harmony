@@ -110,7 +110,9 @@ export class NodeHost {
             const file = fs.openSync(keyPath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC)
             fs.writeSync(file.fd, key)
             fs.closeSync(file)
-            fs.chmodSync(keyPath, 0o600)
+            // No chmod here: @ohos.file.fs exposes no permission API. The
+            // sandbox already isolates per-uid; bootstrap.cjs tightens the
+            // file to 0600 as soon as Node is up (and keeps it there).
           }
         } catch (error) {
           // A missing key file only degrades to "no credentials"; never block boot.

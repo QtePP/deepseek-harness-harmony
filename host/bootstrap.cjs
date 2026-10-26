@@ -79,11 +79,39 @@ function chmodTree(root) {
       chmodTree(child)
     } else {
       try {
-        fs.chmodSync(child, 0o644)
+        // The credential file stays 0600: the relaxation exists for
+        // shell-side debugging, and the key must not become shell-readable.
+        fs.chmodSync(child, child === keyFilePath() ? 0o600 : 0o644)
       } catch {
         /* file may be mid-write */
       }
     }
+  }
+}
+
+/** Path of the credential file handed over by the host, when configured. */
+function keyFilePath() {
+  const configured = process.env.DSH_KEY_FILE
+  return configured && path.isAbsolute(configured) ? configured : null
+}
+
+/**
+ * Tighten the credential file as early as possible. The host cannot chmod
+ * (@ohos.file.fs has no permission API), so the file briefly lands with the
+ * default creation mode inside the app sandbox; per-uid isolation covers
+ * that window, and 0600 from here on also keeps the debug chmod timer and
+ * shell-side reads out.
+ */
+function tightenKeyFile() {
+  const keyFile = keyFilePath()
+  if (!keyFile) return
+  try {
+    if (fs.existsSync(keyFile)) {
+      fs.chmodSync(keyFile, 0o600)
+      log('key: file tightened to 0600')
+    }
+  } catch {
+    /* best effort */
   }
 }
 
@@ -472,6 +500,7 @@ function main() {
   rerouteConsole()
   installRequireBuiltinAlias()
   installLinkFallback()
+  tightenKeyFile()
   const templateReady = installProfileTemplate()
   if (PROFILE === 'acp' && templateReady) {
     PROFILE = 'ohos'
