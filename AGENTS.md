@@ -199,6 +199,18 @@ ACP 实测契约（勿凭直觉改）：
 3. **部署**：`bash scripts/deploy.sh [serial]`（查设备 → 登录 → 签名缺失时生成 → 构建 → 装+启动，
    结束自动还原签名口径）。
 4. **验证**：`devecocli log`；应用内 设置 → 诊断；`uitest dumpLayout` + `hdc file recv` 做无头 UI 断言。
+   纯 JS 搜索插件的本地三段验证（装机前先过一遍，全绿再部署）：
+   - **单测**：必须在**载荷树内**跑——插件 `index.js` 依赖 `@deepseek-ai/schemastery`，
+     只有载荷根能解析，在仓库源目录直接跑会 `ERR_MODULE_NOT_FOUND`：
+     `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-tool-fs-search-js && node --test test/*.test.mjs`（38/38）。
+   - **配置层**：`DSH_HOME=.build/ohos-e2e node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos --patch .build/payload/patches/ohos.patch.yml --dump-config`
+     → `tool-bash`/`tool-pwsh`/`tool-jobs`/`tool-fs-search` 均为 `disabled: true`，末行有
+     `- id: tool-fs-search-ohos`（`name: '@ohos/dsh-tool-fs-search-js'`）。
+     同一条命令对 `sdk` profile 会报 `patch: entry "skill-office" not found`——那是**预期噪音**：
+     `skill-office` 只存在于 sdk 树，平台补丁两 profile 共用，不要为消警告删该行。
+   - **启动冒烟**：`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}\n' | DSH_HOME=.build/ohos-e2e node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos`
+     → 返回 `agentInfo.name = deepseek-harness-acp`。注意用管道喂帧；用 `spawn` 脚本发帧在本机偶发
+     零帧（时序问题，不是启动失败）。
 5. **安全红线**：`secrets.json`、签名材料、设备序列号不进公开仓库；公开文档不出现密钥；
    发现泄漏立即提醒轮换。
 6. **口径同步**：改了协议/架构/流程，必须同一 commit 更新本文件与相关 docs/。
