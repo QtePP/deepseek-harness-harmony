@@ -185,6 +185,11 @@ ACP 实测契约（勿凭直觉改）：
 已知边界（诚实清单）：无 token 级流式；无二进制工具（git/rg/bash）；密钥若随 rawfile 分发
 仅适合自用/内测（优先级：设置页 > `secrets.json`）。
 
+**密钥不得走 env**：`@fellow99/node-bridge` 在启动时把子进程环境 dump 进 `node.log`
+（`[node_bridge] env DEEPSEEK_API_KEY=…`）。因此 `NodeHost` 把 key 写成 `dsh-home/.api-key`（0600），
+通过 `DSH_KEY_FILE` 传路径，由 `bootstrap.cjs` 在桥打完日志之后赋给 `process.env.DEEPSEEK_API_KEY`。
+新增任何敏感变量时沿用这个模式，别直接放进 `env`。
+
 ## 8. Agent 工作流约定
 
 1. **顺序**：改 `.ets` → ArkTS 静态检查（deveco 侧为 `arkts_check`，一次跑全部改动文件）→

@@ -99,6 +99,22 @@ export class NodeHost {
         // bootstrap appends it after the platform patch (later rows win).
         const userPatchPath = `${context.filesDir}/patches/user.patch.yml`
         const hasUserPatch = fs.accessSync(userPatchPath)
+        // The native bridge dumps the child environment into node.log at start
+        // (`[node_bridge] env DEEPSEEK_API_KEY=…`), so the key must NOT travel
+        // as an env var. Hand over a file path instead; bootstrap reads it and
+        // assigns process.env.DEEPSEEK_API_KEY after the bridge has logged.
+        const keyPath = `${dshHome}/.api-key`
+        try {
+          const key = AppConfig.apiKey
+          if (key.length > 0) {
+            const file = fs.openSync(keyPath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC)
+            fs.writeSync(file.fd, key)
+            fs.closeSync(file)
+            fs.chmodSync(keyPath, 0o600)
+          }
+        } catch (error) {
+          // A missing key file only degrades to "no credentials"; never block boot.
+        }
         const options: NodeRuntimeOptions = {
           scriptPath: `${this.payloadRoot}/bootstrap.cjs`,
           payloadRoot: this.payloadRoot,
@@ -110,7 +126,7 @@ export class NodeHost {
           flags: '--jitless --expose-internals',
           env: {
             DSH_HOME: dshHome,
-            DEEPSEEK_API_KEY: AppConfig.apiKey,
+            DSH_KEY_FILE: keyPath,
             DSH_BRIDGE_PORT: `${AppConfig.BRIDGE_PORT}`,
             TMPDIR: tmp,
             HOME: context.filesDir,

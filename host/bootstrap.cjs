@@ -244,6 +244,23 @@ async function boot() {
 
   process.env.DSH_HOME = DSH_HOME
   process.env.DSH_NO_OPEN = '1'
+
+  // The native bridge dumps the child environment into node.log at start
+  // (`[node_bridge] env DEEPSEEK_API_KEY=…`), so the key is handed over as a
+  // 0600 file rather than an env var and assigned here — after that line was
+  // already written. Anything reading process.env sees the usual name.
+  const keyFile = process.env.DSH_KEY_FILE
+  if (keyFile && !process.env.DEEPSEEK_API_KEY) {
+    try {
+      const key = fs.readFileSync(keyFile, 'utf8').trim()
+      if (key.length > 0) {
+        process.env.DEEPSEEK_API_KEY = key
+        log('key: loaded from DSH_KEY_FILE')
+      }
+    } catch {
+      /* no key file: the provider simply stays unauthenticated */
+    }
+  }
   try {
     fs.mkdirSync(DSH_HOME, { recursive: true })
     fs.mkdirSync(path.join(DSH_HOME, 'tmp'), { recursive: true })
