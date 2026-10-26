@@ -126,7 +126,7 @@ export struct MessageItem {
               .fontSize(13)
               .fontFamily('monospace')
               .fontColor($r('app.color.text_primary'))
-              .width('100%')
+              .wordBreak(WordBreak.BREAK_ALL)
               .padding(10)
               .backgroundColor($r('app.color.code_background'))
               .borderRadius(8)
@@ -135,7 +135,7 @@ export struct MessageItem {
               .fontSize(15)
               .lineHeight(22)
               .fontColor($r('app.color.text_primary'))
-              .width('100%')
+              .wordBreak(WordBreak.BREAK_ALL)
               .copyOption(CopyOptions.LocalDevice)
           }
         })
