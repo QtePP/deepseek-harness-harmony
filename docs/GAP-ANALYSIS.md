@@ -35,12 +35,12 @@ ptc-runtime-node ─┘
 |---|---|---|---|
 | 读文件 / 读图 | `tool-fs` read / read_image | ✅ 可用 | 纯 JS（`ctx.fs` → `fs-local`） |
 | 写文件 / 编辑 | `tool-fs` write / edit | ✅ 可用 | 纯 JS |
-| 列目录 / glob | `tool-fs-search` glob | ❌ 调用即失败 | spawn `rg` |
-| 内容搜索 grep | `tool-fs-search` grep | ❌ 调用即失败 | spawn `rg` |
-| bash（一次性） | `tool-bash` | ❌ | spawn shell |
+| 列目录 / glob | `tool-fs-search` glob | ✅ **已替换**（2026-10-26） | 原版 spawn `rg`；现由 `@ohos/dsh-tool-fs-search-js` 纯 JS 实现接管（`ohos` profile 整行替换） |
+| 内容搜索 grep | `tool-fs-search` grep | ✅ **已替换**（2026-10-26） | 同上 |
+| bash（一次性） | `tool-bash` | 🚫 已从工具表移除 | spawn shell；patch 禁用（P0a），模型不可见 |
 | bash（持久） | `tool-bash-persistent` | ❌ | 需要 PTY/长驻进程 |
-| pwsh / pwsh 持久 | `tool-pwsh*` | ❌ | Windows 专用 + spawn |
-| 后台任务 | `tool-jobs` | ❌ | 依赖 subprocess |
+| pwsh / pwsh 持久 | `tool-pwsh*` | 🚫 已从工具表移除 | Windows 专用 + spawn；patch 禁用 |
+| 后台任务 | `tool-jobs` | 🚫 已从工具表移除 | 依赖 subprocess；patch 禁用（P0a） |
 | 程序化工具调用（PTC） | `tool-executor-ptc` + `ptc-runtime-node` | ❌ | 运行时**起新 Node 进程**跑模型写的程序 |
 | 子智能体 / fork | `tool-subagent*` | ✅ | 进程内会话 |
 | 技能 | `tool-skill` | ✅ | 读 SKILL.md |
@@ -64,7 +64,16 @@ ptc-runtime-node ─┘
 `tool-fs` 的 read / write / edit 覆盖了「看文件、改文件」的绝大部分需求。真机上已经用它
 产出过 `index.html`、`stardust.html`。缺的不是读写，是**发现**（glob/grep）。
 
-### L1 — 纯 JS 补齐搜索（P0，性价比最高）
+### L1 — 纯 JS 补齐搜索（P0，性价比最高）✅ **已交付（2026-10-26，真机验证）**
+
+> 实现：`host/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-tool-fs-search-js/index.js`。
+> 走自定义 `ohos` profile（bootstrap 在模板在位时把 `DSH_PROFILE=acp` 重映射为 `ohos`），
+> bundle patch 顶层 `- insert:` 加新行 + `- id: tool-fs-search / disabled: true` 关旧行，
+> 模型侧工具名不变（仍是 `glob`/`grep`），schema/文案与 stock 对齐（`Found X of Y matches`、
+> mtime 升序、行截断、二进制跳过）。真机模型轮实测：`glob **` 命中、`grep TODO` 空结果正确、
+> 模型工具表无 bash/job_*。机制细节见 §7。
+
+原方案（保留作背景）：
 
 把 `tool-fs-search` 的 ripgrep 后端换掉，用 Node 自己走目录：
 
@@ -129,12 +138,12 @@ return hits
 
 ## 4. 建议优先级
 
-| 优先级 | 事项 | 理由 | 工作量 |
+| 优先级 | 事项 | 理由 | 状态 |
 |---|---|---|---|
-| **P0** | 纯 JS 的 glob/grep | agent 的"探索"全靠它，缺了会显著降智（它会反复试 bash） | 0.5–1 天 |
-| **P0** | 从 profile 里禁用 `tool-bash` / `tool-pwsh` / `tool-jobs` | 现在模型会调用它们、失败、再重试，纯浪费轮次和 token | 10 分钟（改 patch） |
-| **P1** | in-process PTC runtime | 真正的"脚本能力"，替代 shell 的主力 | 1–2 天 |
-| **P2** | isomorphic-git 工具 | 手机上看 diff / 提交有实际价值 | 1–2 天 |
+| **P0** | 纯 JS 的 glob/grep | agent 的"探索"全靠它，缺了会显著降智（它会反复试 bash） | ✅ 2026-10-26 交付并真机验证 |
+| **P0** | 从 profile 里禁用 `tool-bash` / `tool-pwsh` / `tool-jobs` | 现在模型会调用它们、失败、再重试，纯浪费轮次和 token | ✅ 2026-10-26 交付（ohos.patch.yml，模型工具表已无这些行） |
+| **P1** | in-process PTC runtime | 真正的"脚本能力"，替代 shell 的主力 | 待做（1–2 天） |
+| **P2** | isomorphic-git 工具 | 手机上看 diff / 提交有实际价值 | 待做（1–2 天） |
 | — | 终端、编译、包管理 | 平台决定，不做 | — |
 
 > P0 的第二项值得单独强调：**让工具"不存在"比让它"失败"更好**。模型看到 bash 工具在
@@ -174,7 +183,7 @@ return hits
 | `--patch` 里写 `- id: 新id` + `name` | ❌ `patch: entry "新id" not found`——**patch 只能改/禁已有行，不能新增** |
 | patch 用 `insert:` | ❌ `patch insert: entry "tool-fs-search" is not a group`——只能插进 group，acp profile 里没有 group |
 | 自定义 profile（`package.json` 的 `dsh.profile.bundles` 加自建 bundle 包） | ✅ **行能进组合配置**：`--dump-config` 能看到新行，`boot: --profile ohos` 正常挂载 |
-| 同上，并让插件真正注册 | ❌ **未通过**：模型工具列表里没有新工具（见下） |
+| 同上，并让插件真正注册 | ✅ **已通过（2026-10-26）**：根因是插件包没有声明为 **bundle 的 `dependencies`**——profile 路由表（`collectProfileScopePackages`）按 bundle 依赖闭包构建，未声明的包即使文件在 `node_modules` 里也永远不解析、不 mount |
 
 自定义 profile 的形状（`--from-default-profile acp` 生成后改）：
 
@@ -206,6 +215,48 @@ workflow, working_directory
 2. bundle 的 `cordis.patch.yml` 里用**相对路径**引用插件（文档提到 "Inserted relative plugin
    paths are anchored beside their patch file"）
 3. 把插件直接放进 bundle 包内，由 bundle 的 patch 用相对路径加载
+
+### 7.1 闭环记录（2026-10-26）
+
+**根因确认**：方向 1 命中一半——**要声明的是 bundle 的 `dependencies`，不是 profile 的**，且
+不需要 pnpm install（dsh 只查包存在性）。路由表构建链：
+
+```
+loadProfileDirectory → 各 bundle package.json 的 dependencies 闭包
+  （dsh-app-boot `collectProfileScopePackages`）→ entries 路由表
+  → ESM resolve hook 对 profiles 树内的 import 按 importee 裸名查表
+```
+
+未声明的包：文件在 `node_modules` 里也存在、`--dump-config` 也看到行，但 import 解析时
+路由表里没有条目 → 插件加载失败 → 工具不注册。**验证手段**：在插件 `apply()` 里写 marker
+文件——声明依赖后 `ping-mounted.marker` 落盘，`apply()` 真实执行。
+
+**另外两个实测细节**：
+
+- bundle patch 的新行写法是**顶层单条 `- insert:` 嵌套行列表**（dsh-base 自己就是这么加
+  全部核心行的）；裸 `- id:` 行只能改/禁已有行。
+- `resolveBundleDir` 先查 installAnchor（载荷 `node_modules`）再查 profile 目录——
+  **载荷里残留的同名 `@ohos/*` 测试包会遮蔽 profile 内的新版**（旧包+旧语法会制造
+  "patch not found" 假象，排查时先清残留）。
+
+**交付物**（`host/profile-ohos/profiles/ohos/`）：
+
+```
+package.json                  # dsh.profile.bundles: [dsh-base, dsh-acp-app, @ohos/dsh-bundle-ohos]
+cordis.yml / cordis.patch.yml / pnpm-workspace.yaml
+node_modules/@ohos/
+├── dsh-bundle-ohos/          # bundle：dependencies 声明插件 + dsh.bundle.patch
+│   ├── package.json          #   （insert 新行 + disable 旧行）
+│   └── cordis.patch.yml
+└── dsh-tool-fs-search-js/    # 纯 JS glob/grep 插件（~370 行）
+    └── index.js
+```
+
+宿主接线：`scripts/assemble-payload.mjs` 把模板打进载荷 `profile-ohos/profiles/`；
+`host/bootstrap.cjs` 启动时按**内容哈希戳**（`.ohos-template-stamp`）幂等安装到
+`$DSH_HOME/profiles/ohos`，并在模板在位时把 `acp` 重映射为 `ohos`（缺模板回落 stock acp）。
+真机验证：`bridge-status.json` 的 `profile: "ohos"`、模型轮 `glob/grep` 真实命中、
+工具表无 bash/job_*、权限三档快照正常。
 
 > 工具定义的正确形状（从 `tool-fs/src/read.ts` 取，供实现时对齐）：
 > ```js

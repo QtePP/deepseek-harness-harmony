@@ -1,0 +1,16 @@
+{
+  "name": "dsh-profile-ohos",
+  "private": true,
+  "dependencies": {
+    "@ohos/dsh-bundle-ohos": "0.1.0"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-acp-app",
+        "@ohos/dsh-bundle-ohos"
+      ]
+    }
+  }
+}

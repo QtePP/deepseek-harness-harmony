@@ -52,7 +52,18 @@ const LOG_FILE = path.join(DSH_HOME, 'bridge.log')
  *        session/cancel  (+ notifications session/update, and the server-issued
  *        request `session/request_permission`)
  */
-const PROFILE = (process.env.DSH_PROFILE || 'sdk').trim() || 'sdk'
+let PROFILE = (process.env.DSH_PROFILE || 'sdk').trim() || 'sdk'
+
+/**
+ * Custom profile template shipped in the payload (rawfile). When present it
+ * is copied into $DSH_HOME/profiles so the loader can pick `--profile ohos`
+ * up; a content-hash stamp makes the copy idempotent across boots while still
+ * refreshing after a payload update. The template carries the pure-JS search
+ * bundle (`@ohos/dsh-tool-fs-search-js`) that replaces the spawn-ripgrep
+ * tool-fs-search, which can never run here (fork/exec is forbidden).
+ */
+const PROFILE_TEMPLATE_DIR = path.join(PAYLOAD_ROOT, 'profile-ohos', 'profiles', 'ohos')
+const TEMPLATE_STAMP_FILE = '.ohos-template-stamp'
 
 let booted = false
 let client = null
@@ -356,10 +367,99 @@ function installRequireBuiltinAlias() {
   log('addon: node-addon-require-builtin unavailable, using --expose-internals shim')
 }
 
+/**
+ * Content hash of the template tree (sorted path + bytes), so a payload
+ * update changes the digest and triggers a refresh of the working copy.
+ */
+function hashTemplateTree(root) {
+  const crypto = require('node:crypto')
+  const hash = crypto.createHash('sha256')
+  const walk = (dir, prefix) => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    for (const entry of entries) {
+      const child = path.join(dir, entry.name)
+      const rel = prefix + entry.name
+      if (entry.isDirectory()) {
+        hash.update(rel + '/\0')
+        walk(child, rel + '/')
+      } else if (entry.isFile()) {
+        hash.update(rel + '\0')
+        hash.update(fs.readFileSync(child))
+        hash.update('\0')
+      }
+    }
+  }
+  hash.update('template-v1\0')
+  walk(root, '')
+  return hash.digest('hex')
+}
+
+/** Plain recursive copy (the template holds only regular files and dirs). */
+function copyTemplateTree(source, target) {
+  fs.mkdirSync(target, { recursive: true })
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name)
+    const to = path.join(target, entry.name)
+    if (entry.isDirectory()) {
+      copyTemplateTree(from, to)
+    } else if (entry.isFile()) {
+      fs.copyFileSync(from, to)
+    }
+  }
+}
+
+/**
+ * Install the shipped `ohos` profile template into $DSH_HOME/profiles/ohos.
+ * The payload tree is read-only, so dsh needs a writable working copy. The
+ * stamp file records the source content hash: unchanged hash + existing copy
+ * → no-op; changed hash (payload update) → refresh. Returns true when a
+ * usable template is in place.
+ */
+function installProfileTemplate() {
+  if (PROFILE !== 'acp' && PROFILE !== 'ohos') return false
+  if (!fs.existsSync(path.join(PROFILE_TEMPLATE_DIR, 'package.json'))) return false
+  const target = path.join(DSH_HOME, 'profiles', 'ohos')
+  if (!path.isAbsolute(target)) {
+    log('profile template: refusing relative target')
+    return false
+  }
+  let digest = ''
+  try {
+    digest = hashTemplateTree(PROFILE_TEMPLATE_DIR)
+  } catch (error) {
+    log(`profile template: hash failed: ${error && error.message}`)
+    return false
+  }
+  const stampFile = path.join(target, TEMPLATE_STAMP_FILE)
+  try {
+    if (
+      fs.existsSync(stampFile) &&
+      fs.readFileSync(stampFile, 'utf8').trim() === digest &&
+      fs.existsSync(path.join(target, 'package.json'))
+    ) {
+      return true
+    }
+    fs.rmSync(target, { recursive: true, force: true })
+    copyTemplateTree(PROFILE_TEMPLATE_DIR, target)
+    fs.writeFileSync(stampFile, digest + '\n')
+    log(`profile template: installed ohos (hash ${digest.slice(0, 12)})`)
+    return true
+  } catch (error) {
+    log(`profile template: install failed: ${error && error.stack || error}`)
+    return false
+  }
+}
+
 function main() {
   rerouteConsole()
   installRequireBuiltinAlias()
   installLinkFallback()
+  const templateReady = installProfileTemplate()
+  if (PROFILE === 'acp' && templateReady) {
+    PROFILE = 'ohos'
+    log('profile: remapping acp -> ohos (custom template present)')
+  }
   process.on('uncaughtException', (error) => {
     bootError = error
     log(`uncaught: ${error && error.stack || error}`)

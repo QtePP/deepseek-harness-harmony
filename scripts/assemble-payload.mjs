@@ -12,6 +12,10 @@
  *   fetch-shim.cjs       pure-JS fetch for --jitless (no WebAssembly)
  *   package.json         {"type":"commonjs"}
  *   node_modules/        @deepseek-ai/dsh and its dependencies
+ *   profile-ohos/        custom `ohos` profile template (pure-JS search bundle);
+ *                        bootstrap.cjs copies it into $DSH_HOME/profiles and
+ *                        remaps DSH_PROFILE=acp -> ohos when present
+ *   patches/             profile patch YAMLs (platform + user capability toggles)
  *
  * Usage:
  *   node scripts/assemble-payload.mjs                # install + pack
@@ -84,6 +88,21 @@ function stageHost() {
 }
 
 /**
+ * Stage the custom `ohos` profile template (pure-JS glob/grep search bundle
+ * and friends). bootstrap.cjs looks for `<payload>/profile-ohos/profiles/ohos`
+ * at boot: present → install into $DSH_HOME/profiles + remap acp → ohos;
+ * absent → stock profiles only.
+ */
+function stageProfileTemplate() {
+  const source = join(HOST_DIR, 'profile-ohos', 'profiles')
+  if (!existsSync(join(source, 'ohos', 'package.json'))) {
+    throw new Error(`ohos profile template missing: ${join(source, 'ohos', 'package.json')}`)
+  }
+  rmSync(join(STAGING, 'profile-ohos'), { recursive: true, force: true })
+  cpSync(source, join(STAGING, 'profile-ohos', 'profiles'), { recursive: true })
+}
+
+/**
  * Replace the POSIX flock binding with a single-process no-op.
  *
  * HarmonyOS forbids fork/exec, so the app process is the only writer of the
@@ -129,6 +148,7 @@ function pack() {
 
 prepareStaging()
 stageHost()
+stageProfileTemplate()
 patchNodeModules()
 const version = verify()
 pack()

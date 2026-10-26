@@ -1,13 +1,15 @@
 # HarmonyOS profile patch — MINIMAL SET.
 #
 # 原则：只禁用「调用即失败」的用户级工具，不动服务级行。
-# 禁用服务行会连带打掉依赖它的能力，实测代价：
+# 历史教训（勿重蹈）：
 #   · 禁 subprocess → tool-fs-search / ptc-runtime / workflow-ptc / tool-workflow 全部 pending
-#   · 禁 tool-bash  → shell 服务缺失 → permission-presets pending（权限门失效，属安全降级）
-# 本地对比：不加补丁 0 个未激活；早期版本禁用 subprocess + tool-bash 后 5 个未激活。
+#     （所以 search 走 ohos profile 的纯 JS 插件整行替换，不走补丁禁用）
+#   · 早期实测「禁 tool-bash → permission-presets pending」为 SDK profile 下的组合现象；
+#     ACP/ohos profile 的权限三档由 DSH_PERMISSION_MODE 启动期固化（permission/preset、
+#     sandbox/mode、approval/policy 三行），与 tool-bash 行无依赖，本地 boot 对比已复核。
 #
-# 启用方式：复制为 ohos.patch.yml 后重新装配载荷。
-# 核对行 id：node node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --dump-config
+# 启用方式：装配期由 PluginConfig 生成/复制，经 --patch 传入（后于 ohos 用户补丁可覆盖）。
+# 核对行 id：node node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos --dump-config
 
 # Windows 专用，鸿蒙上永远无效。
 - id: tool-pwsh
@@ -23,4 +25,13 @@
 
 # Office 文档转换绑定 koffi（原生 FFI），签名域外无法加载。
 - id: skill-office
+  disabled: true
+
+# bash 工具每次调用都因禁 fork/exec 失败，模型调用即浪费一轮（ACP profile 实测同罪）。
+# 已核对：禁用后 permission 三档 / 模型工具表其余行不受影响。
+- id: tool-bash
+  disabled: true
+
+# job_* 工具族依赖子进程派生，鸿蒙上必然失败，同样整族收敛到单行禁用。
+- id: tool-jobs
   disabled: true
