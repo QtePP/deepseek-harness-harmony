@@ -107,6 +107,10 @@ ACP 实测契约（勿凭直觉改）：
   data 回显原帧），到不了方法分发。
 - **断线重连**：桥保持流不关闭，重连后 `initialize` 幂等，**直接对旧 sessionId 发 prompt 即可**；
   不要 resume（会撞 `already active`）。
+- **断线时正在跑的那一轮**：服务端继续跑，且 `session/update` 会投给新连接；但原 `session/prompt`
+  的响应**永久丢失**，且 update 帧里没有 turn/message id，无法关联——**客户端无从判断它何时结束**。
+  因此重连应走「重置语义」：`initialize` → `session/close`（掐掉孤儿轮）→ `session/resume` →
+  把那条消息标为「已中断」让用户决定是否重发。细节见 `docs/SPIKE-ACP.md` §11。
 - `configOptions` 是模型列表的权威来源，客户端不要硬编码模型。
 - **权限三档（dsh 具名预设，沙箱+审批捆绑）**：`DSH_PERMISSION_MODE` = `read-only` /
   `workspace-write`（默认）/ `danger-full-access`，审批策略 `=== 'danger-full-access' ?

@@ -235,3 +235,37 @@ App 客户端真机验证（手机 read-only 多轮 + 平板 danger-full-access 
 - **桥是单客户端**：新连接 `replacing previous client` 顶掉旧连接——外部探针实验后必须
   重启 App 恢复客户端连接（AcpClient 暂无重连）。
 - 已知 UI 缺陷：审批弹窗渲染进 transcript 滚动流，自动滚动可将其推出视口（应改固定覆盖层）。
+
+---
+
+## 11. 断线时正在进行的一轮（决定重连怎么做）
+
+问题：App 切后台断 socket 时如果正有一轮在跑，服务端会怎样？重连后能不能接着看？
+
+实测（本地 Node 22 + 同载荷，`--jitless`）：
+
+| 观察 | 结果 |
+|---|---|
+| 断线后该轮是否继续 | ✅ 继续跑（服务端不感知客户端消失） |
+| 重连后的新连接能否收到它的 `session/update` | ✅ 能（15s 内收到 3 条：`agent_thought_chunk` / `agent_message_chunk` / `usage_update`） |
+| 原连接的 `session/prompt` 响应 | ❌ **永久丢失**，客户端 promise 只能超时 |
+| `session/update` 里能否区分轮次 | ❌ `{sessionId, update}`，**没有 turn/step/message id** |
+| `session/close` 能否终止孤儿轮 | ✅ 能（close 后 0 条 update），之后 `session/resume` + `session/prompt` 均正常 |
+
+结论：**重连后无法判断孤儿轮何时结束**——没有 turn/end 通知，也没有 id 可关联，`stopReason`
+随响应帧一起丢了。因此「接着听」是伪方案。
+
+### 推荐做法（重置语义）
+
+断线重连后：
+
+1. `initialize`（幂等）
+2. `session/close`（把孤儿轮掐掉，避免幽灵输出）
+3. `session/resume`（拿回 `configOptions`）
+4. 把断线时那条用户消息标记为「已中断」，由用户决定是否重发
+
+理由：确定性。代价是丢掉半截回答，但这比「界面永远转圈、且新回答可能被孤儿轮的 chunk 污染」
+要好。观测式重连（保留流、等结束）不可行，因为结束信号不存在。
+
+> 未测：对孤儿轮发 `session/cancel`（通知）是否也能终止。若可行，可做「保留半截 + 显式中断」，
+> 但结束检测仍需客户端自己超时兜底。
