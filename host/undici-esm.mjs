@@ -15,6 +15,8 @@ import shim from './fetch-shim.cjs'
 export const fetch = shim.fetch
 export const Headers = shim.Headers
 export const Response = shim.Response
+export const Request = shim.Request
+export const FormData = shim.FormData
 export const Agent = shim.Agent
 export const request = shim.request
 export const setGlobalDispatcher = shim.setGlobalDispatcher

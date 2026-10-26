@@ -3,13 +3,18 @@
  *
  * Under `--jitless`, `WebAssembly` is undefined. Node's built-in `fetch` is
  * implemented by undici, whose HTTP parser (llhttp) ships as WASM, so every
- * outbound request fails before it reaches the network. dsh imports `undici`
- * directly in a few places and otherwise uses the global `fetch`.
+ * outbound request fails before it reaches the network. On Node ≥24 the whole
+ * fetch family (fetch/Headers/Response/Request/FormData) sits behind lazy
+ * accessors, and dsh reads globalThis.Headers during boot
+ * (dsh-deepseek-account-platform platformHeaders), so `install()` swaps the
+ * ENTIRE family via defineProperty — descriptor replacement, never assignment:
+ * assignment goes through the accessor and materialises the WASM undici
+ * regardless of jitless. dsh also imports `undici` directly in a few places.
  *
  * This module provides a dependency-free replacement built on `node:http` /
- * `node:https` and `node:stream/web`, plus a CommonJS resolution alias for
- * `undici`. It is intentionally tolerant: undici-only APIs are stubbed so an
- * import never throws, even when the feature degrades.
+ * `node:https` and `node:stream/web`, plus resolution aliases for `undici`
+ * (CommonJS and ESM). It is intentionally tolerant: undici-only APIs are
+ * stubbed so an import never throws, even when the feature degrades.
  */
 
 'use strict'
@@ -67,6 +72,65 @@ class Headers {
 
   [Symbol.iterator]() {
     return this._map.entries()
+  }
+}
+
+/** Minimal Request for callers that construct one before passing it to fetch. */
+class Request {
+  constructor(url, init) {
+    const options = init || {}
+    this.url = typeof url === 'string' ? url : url.url
+    this.method = (options.method || 'GET').toUpperCase()
+    this.headers = new Headers(options.headers)
+    this.body = options.body
+    this.signal = options.signal
+  }
+
+  clone() {
+    return this
+  }
+}
+
+/** Minimal FormData: append/get/has/entries, good enough for multipart builders. */
+class FormData {
+  constructor() {
+    this._map = new Map()
+  }
+
+  append(name, value) {
+    const key = String(name)
+    const list = this._map.get(key)
+    if (list === undefined) this._map.set(key, [String(value)])
+    else list.push(String(value))
+  }
+
+  get(name) {
+    const list = this._map.get(String(name))
+    return list === undefined || list.length === 0 ? null : list[0]
+  }
+
+  getAll(name) {
+    return (this._map.get(String(name)) || []).slice()
+  }
+
+  has(name) {
+    return this._map.has(String(name))
+  }
+
+  entries() {
+    const out = []
+    this._map.forEach((list, key) => {
+      for (const value of list) out.push([key, value])
+    })
+    return out[Symbol.iterator]()
+  }
+
+  [Symbol.iterator]() {
+    return this.entries()
+  }
+
+  forEach(callback) {
+    for (const entry of this.entries()) callback(entry[1], entry[0], this)
   }
 }
 
@@ -262,17 +326,33 @@ function install() {
     }
   }
 
-  if (typeof WebAssembly === 'undefined') {
-    define('fetch', fetchImpl)
-  } else if (typeof globalThis.fetch !== 'function') {
-    define('fetch', fetchImpl)
+  // Node ≥24 installs the fetch family as LAZY ACCESSORS: the first read of
+  // fetch/Headers/Response/Request/FormData materialises the built-in undici,
+  // whose llhttp parser is WASM — under --jitless that read throws
+  // "ReferenceError: WebAssembly is not defined". dsh reads globalThis.Headers
+  // while still booting (dsh-deepseek-account-platform platformHeaders →
+  // `new Headers()` inside `new PlatformAccount`), so the whole family must be
+  // swapped BEFORE dsh loads. defineProperty replaces the accessor descriptor
+  // without invoking it; plain assignment would go through the setter and
+  // materialise anyway (that side effect is what the old build owed its
+  // accidental boot protection to).
+  const replacements = {
+    fetch: fetchImpl,
+    Headers,
+    Response,
+    Request,
+    FormData
   }
-  // Deliberately NOT redefining Headers / Response / Request: measured on Node
-  // 24.2.0, redefining any of the three materialises Node's lazy web globals,
-  // which initialises the built-in undici and rejects with
-  // "WebAssembly is not defined" under --jitless. Redefining `fetch` alone is
-  // safe, and callers that construct Headers themselves still get ours through
-  // the returned Response objects.
+  for (const name of Object.keys(replacements)) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, name)
+    const shape = descriptor === undefined
+      ? 'absent'
+      : descriptor.get || descriptor.set
+        ? `lazy accessor (configurable: ${descriptor.configurable})`
+        : 'plain value'
+    define(name, replacements[name])
+    console.error(`fetch-shim: globalThis.${name} was ${shape}, replaced with shim`)
+  }
 
   // CommonJS alias: `require('undici')` resolves here.
   const original = Module._resolveFilename
@@ -281,9 +361,22 @@ function install() {
     return original.call(this, request, ...rest)
   }
 
+  // Guard against an explicit `require('node:internal/deps/undici/undici')`
+  // under --expose-internals: the bundle's global.js eagerly constructs an
+  // Agent whose llhttp is WASM — fatal under jitless. Serve the shim instead.
+  const originalLoad = Module._load
+  Module._load = function (request, parent, isMain) {
+    if (typeof request === 'string' && request.includes('internal/deps/undici')) {
+      return module.exports
+    }
+    return originalLoad.call(this, request, parent, isMain)
+  }
+
   module.exports.fetch = fetchImpl
   module.exports.Headers = Headers
   module.exports.Response = Response
+  module.exports.Request = Request
+  module.exports.FormData = FormData
   module.exports.Agent = Agent
   module.exports.setGlobalDispatcher = (next) => { dispatcher = next || dispatcher }
   module.exports.getGlobalDispatcher = () => dispatcher
@@ -296,6 +389,8 @@ module.exports = {
   fetch: fetchImpl,
   Headers,
   Response,
+  Request,
+  FormData,
   Agent,
   setGlobalDispatcher: (next) => { dispatcher = next || dispatcher },
   getGlobalDispatcher: () => dispatcher,
