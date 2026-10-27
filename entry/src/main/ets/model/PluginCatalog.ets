@@ -27,7 +27,6 @@ export class PluginCatalog {
     { id: 'tool-fs', label: '文件操作', description: '读写与编辑工作区文件' },
     { id: 'tool-todo', label: '任务清单', description: 'todo_write 计划与进度管理' },
     { id: 'tool-goal', label: '目标管理', description: '长目标创建与自动续跑' },
-    { id: 'tool-jobs', label: '后台任务', description: '异步 job 启动与跟踪' },
     { id: 'tool-subagent', label: '子代理', description: '委派独立子任务给子代理' },
     { id: 'tool-subagent-fork', label: '上下文分叉', description: 'fork 继承对话上下文的子代理' },
     { id: 'tool-skill', label: '技能加载', description: '加载技能目录的完整指令' },
@@ -35,16 +34,18 @@ export class PluginCatalog {
     { id: 'session-title-llm', label: '智能会话标题', description: '由模型生成会话标题' }
   ]
 
-  /** Disabled by the platform patch; shown as constrained, not switchable. */
+  /**
+   * Informational only: capabilities the platform patch unconditionally
+   * disables (ohos.patch.yml) or that can never work here. Rows may merge
+   * several runtime entry ids into one line; ids are display keys, never
+   * written to user.patch.yml. tool-jobs must stay in this list — the
+   * platform patch disables it in both profiles, so a switch would lie.
+   */
   static readonly LOCKED: CatalogEntry[] = [
-    { id: 'tool-bash', label: 'Shell 工具 (bash)', description: '依赖子进程，平台禁止' },
-    { id: 'tool-pwsh', label: 'Shell 工具 (pwsh)', description: '依赖子进程，平台禁止' },
-    { id: 'bash-sandbox', label: 'Bash 沙箱', description: '依赖子进程，平台禁止' },
-    { id: 'pwsh-sandbox', label: 'Pwsh 沙箱', description: '依赖子进程，平台禁止' },
-    { id: 'subprocess', label: '子进程服务', description: '平台禁止 fork/exec' },
-    { id: 'plugin-manager', label: '插件管理器', description: '通过子进程运行包管理器' },
-    { id: 'tool-plugin-manager', label: '插件管理工具', description: '依赖插件管理器服务' },
-    { id: 'skill-office', label: 'Office 文档转换', description: '绑定原生 FFI 库' }
+    { id: 'shell', label: 'Shell 工具（bash / pwsh）', description: '依赖子进程，平台禁止 fork/exec' },
+    { id: 'jobs', label: '后台任务（job_* 工具族）', description: '依赖子进程派生，平台禁止' },
+    { id: 'plugin-market', label: '插件市场与插件管理', description: '依赖 pnpm 子进程，平台禁止' },
+    { id: 'office', label: 'Office 文档转换', description: '绑定原生 FFI 库（koffi），无法加载' }
   ]
 
   static rows(disabled: Set<string>): PluginRow[] {

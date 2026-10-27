@@ -9,6 +9,7 @@ export struct SettingsSheet {
   @State profile: string = 'sdk'
   @State permissionMode: string = 'workspace-write'
   @State showDiagnostics: boolean = false
+  @State showLocked: boolean = false
   @Prop initialKey: string = ''
   @Prop initialModel: string = ''
   @Prop initialProfile: string = 'sdk'
@@ -36,6 +37,26 @@ export struct SettingsSheet {
       return '宽松：完全访问，不再弹任何审批'
     }
     return '平衡：工作区内直接读写，越区升级弹审批（默认）'
+  }
+
+  private togglableRows(): PluginRow[] {
+    const out: PluginRow[] = []
+    for (const row of this.pluginRows) {
+      if (!row.locked) {
+        out.push(row)
+      }
+    }
+    return out
+  }
+
+  private lockedRows(): PluginRow[] {
+    const out: PluginRow[] = []
+    for (const row of this.pluginRows) {
+      if (row.locked) {
+        out.push(row)
+      }
+    }
+    return out
   }
 
   build() {
@@ -189,7 +210,7 @@ export struct SettingsSheet {
 
         Column({ space: 6 }) {
           Text('dsh 能力开关').fontSize(12).fontColor($r('app.color.text_secondary'))
-          ForEach(this.pluginRows, (row: PluginRow) => {
+          ForEach(this.togglableRows(), (row: PluginRow) => {
             Row({ space: 10 }) {
               Column({ space: 2 }) {
                 Text(row.label)
@@ -202,20 +223,46 @@ export struct SettingsSheet {
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)
 
-              if (row.locked) {
-                Text('平台受限')
-                  .fontSize(11)
-                  .fontColor($r('app.color.text_tertiary'))
-              } else {
-                Toggle({ type: ToggleType.Switch, isOn: row.enabled })
-                  .selectedColor($r('app.color.brand'))
-                  .onChange((isOn: boolean) => {
-                    this.onTogglePlugin(row.id, isOn)
-                  })
-              }
+              Toggle({ type: ToggleType.Switch, isOn: row.enabled })
+                .selectedColor($r('app.color.brand'))
+                .onChange((isOn: boolean) => {
+                  this.onTogglePlugin(row.id, isOn)
+                })
             }
             .width('100%')
           }, (row: PluginRow) => `${row.id}.${row.enabled}`)
+
+          Row() {
+            Text(`平台受限能力（${this.lockedRows().length}）`)
+              .fontSize(12)
+              .fontColor($r('app.color.text_secondary'))
+              .layoutWeight(1)
+            Text(this.showLocked ? '收起' : '展开')
+              .fontSize(12)
+              .fontColor($r('app.color.brand'))
+          }
+          .width('100%')
+          .padding({ top: 4 })
+          .onClick(() => {
+            this.showLocked = !this.showLocked
+          })
+
+          if (this.showLocked) {
+            ForEach(this.lockedRows(), (row: PluginRow) => {
+              Column({ space: 2 }) {
+                Text(row.label)
+                  .fontSize(13)
+                  .fontColor($r('app.color.text_secondary'))
+                Text(row.description)
+                  .fontSize(11)
+                  .fontColor($r('app.color.text_tertiary'))
+              }
+              .alignItems(HorizontalAlign.Start)
+              .width('100%')
+              .padding({ top: 4 })
+            }, (row: PluginRow) => row.id)
+          }
+
           Text('修改能力开关后，需彻底退出并重新打开应用才会生效（Node 每进程仅启动一次）。')
             .fontSize(11)
             .fontColor($r('app.color.text_tertiary'))
