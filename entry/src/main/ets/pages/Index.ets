@@ -67,6 +67,12 @@ struct Index {
   private liveAssistant: ChatMessage | null = null
   /** Current model config value (JSON array string on the wire). */
   private currentModelValue: string = ''
+  /** A reconnect chain is running; at most one may exist. */
+  private reconnecting: boolean = false
+  /** A turn was in flight when the bridge socket dropped. */
+  private turnInFlight: boolean = false
+  /** A drop that arrived while the reconnect chain was already running. */
+  private redispatchDisconnect: string = ''
 
   aboutToAppear(): void {
     void this.init()
@@ -98,6 +104,9 @@ struct Index {
     }
     this.host.acp.onPermission = (request: AcpPermissionRequest) => {
       this.handleAcpPermission(request)
+    }
+    this.host.acp.onDisconnect = (reason: string) => {
+      this.handleAcpDisconnect(reason)
     }
     await this.boot()
     // ACP session ids come from the server: a fresh app start with no
@@ -367,11 +376,18 @@ struct Index {
     }
     this.append(new ChatMessage(newSessionId(), Role.USER, text, ''))
     void this.persist()
+    if (this.reconnecting) {
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+        '连接正在恢复，该消息未发送，请稍后重发。', '连接'))
+      return
+    }
     await this.ensureAcpSession()
     this.running = true
     this.liveAssistant = null
+    this.turnInFlight = true
     try {
       const result = await this.host.acp.sessionPrompt(this.currentId, text)
+      this.turnInFlight = false
       this.running = false
       this.liveAssistant = null
       const stop = result.stopReason === undefined ? '' : result.stopReason
@@ -382,10 +398,22 @@ struct Index {
       }
       void this.persist()
     } catch (error) {
+      this.turnInFlight = false
       this.running = false
       this.liveAssistant = null
-      this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `发送失败：${(error as Error).message}`, '错误'))
+      // A transport drop is explained by the reconnect flow instead; every
+      // other failure stays a plain send error.
+      const message = (error as Error).message
+      if (!this.isTransportDrop(message)) {
+        this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `发送失败：${message}`, '错误'))
+      }
     }
+  }
+
+  /** Whether an error message describes the bridge socket dropping. */
+  private isTransportDrop(message: string): boolean {
+    return message.includes('bridge closed') || message.includes('bridge error') ||
+      message.includes('bridge not connected') || message.includes('send failed')
   }
 
   /** Render one session/update notification into the transcript. */
@@ -468,6 +496,123 @@ struct Index {
       return
     }
     this.host.acp.sessionCancel(this.currentId)
+  }
+
+  /**
+   * The bridge socket dropped unexpectedly (a probe stole the single client
+   * slot, or a transport failure). The bridge keeps the runtime alive, so
+   * recovery needs no app restart: reconnect after a backoff that leaves
+   * short probe experiments alone, then either reattach quietly (no turn
+   * was lost) or run the reset semantics of SPIKE-ACP §11 for an orphaned
+   * turn — close it (its response is lost with the socket and its end is
+   * undetectable), resume the session, and tell the user to resend.
+   */
+  private handleAcpDisconnect(reason: string): void {
+    if (this.phase !== BootPhase.READY) {
+      return
+    }
+    if (this.reconnecting) {
+      // The running chain notices the new drop and restarts itself.
+      this.redispatchDisconnect = reason
+      return
+    }
+    this.reconnecting = true
+    const orphan = this.turnInFlight
+    this.turnInFlight = false
+    this.running = false
+    this.liveAssistant = null
+    // Any pending approval belongs to the dropped connection's request; the
+    // orphaned turn (if any) is closed below, so the dialog is moot.
+    this.approvalRequest = null
+    this.approvalVisible = false
+    this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+      `与 dsh 运行时的连接中断（${reason}），正在重新连接…`, '连接'))
+    void this.persist()
+    void this.reconnectAcp(orphan)
+  }
+
+  /** Backoff chain: 2 min first, doubling, capped at 5 min, 6 attempts. */
+  private async reconnectAcp(orphan: boolean): Promise<void> {
+    let delayMs = 120000
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await this.delay(delayMs)
+      if (this.phase !== BootPhase.READY) {
+        this.finishReconnect()
+        return
+      }
+      try {
+        await this.host.acp.connect(AppConfig.BRIDGE_PORT)
+        await this.host.acp.initialize()
+        await this.reattachAcp(orphan)
+        this.finishReconnect()
+        return
+      } catch (error) {
+        delayMs = Math.min(delayMs * 2, 300000)
+      }
+    }
+    this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+      '重新连接失败：请检查运行时状态后重启应用。', '连接'))
+    void this.persist()
+    this.finishReconnect()
+  }
+
+  /** End the chain; restart immediately if another drop queued meanwhile. */
+  private finishReconnect(): void {
+    this.reconnecting = false
+    const reason = this.redispatchDisconnect
+    if (reason.length > 0) {
+      this.redispatchDisconnect = ''
+      this.handleAcpDisconnect(reason)
+    }
+  }
+
+  /**
+   * After a successful reconnect: a session whose turn was orphaned is
+   * closed and resumed (reset semantics); an idle session stays active
+   * server-side and is simply prompted directly on the next send. A
+   * transport failure here throws so the reconnect chain retries.
+   */
+  private async reattachAcp(orphan: boolean): Promise<void> {
+    if (this.context === null || !orphan) {
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM, '已重新连接。', '连接'))
+      void this.persist()
+      return
+    }
+    try {
+      await this.host.acp.sessionClose(this.currentId)
+    } catch (error) {
+      const message = (error as Error).message
+      if (this.isTransportDrop(message) || message.includes('timed out')) {
+        throw error as Error
+      }
+      // Already closed server-side (e.g. the probe that took the slot) —
+      // the resume below still applies.
+    }
+    try {
+      const cwd = ProjectStore.workspaceDir(this.context, this.currentProjectId)
+      const restored = await this.host.acp.sessionResume(this.currentId, cwd)
+      this.openedSessions.add(this.currentId)
+      this.applyAcpConfig(restored)
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+        '已重新连接。断线时的那一轮已中断，需要的话请重发该消息。', '连接'))
+    } catch (error) {
+      const message = (error as Error).message
+      if (this.isTransportDrop(message) || message.includes('timed out')) {
+        throw error as Error
+      }
+      this.openedSessions.delete(this.currentId)
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+        '已重新连接，但原会话在服务端已不可用；下次发送将自动新开会话继续。', '连接'))
+    }
+    void this.persist()
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        resolve()
+      }, ms)
+    })
   }
 
   /**

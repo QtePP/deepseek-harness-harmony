@@ -3,7 +3,7 @@ import { util } from '@kit.ArkTS'
 import { BusinessError } from '@kit.BasicServicesKit'
 import { decodeFrame, encodeRequest, LinkState, RpcFrame } from './Protocol'
 import {
-  AcpCancelParams, AcpClientCapabilities, AcpContentBlock, AcpInitializeParams, AcpInitializeResult,
+  AcpCancelParams, AcpClientCapabilities, AcpCloseParams, AcpContentBlock, AcpInitializeParams, AcpInitializeResult,
   AcpPermissionPayload, AcpPermissionRequest, AcpPermissionResponse, AcpPermissionOutcome,
   AcpPromptParams, AcpPromptResult, AcpResumeParams, AcpSessionNewParams, AcpSessionNewResult,
   AcpSetConfigParams, AcpUpdatePayload, encodeNotification
@@ -33,6 +33,10 @@ class AcpEmptyResult {
  * fail-closed). The bridge keeps the runtime alive across socket drops;
  * after a reconnect `initialize` is idempotent and an active session is
  * continued by prompting it directly (never resume — AGENTS.md §4.2).
+ *
+ * The client does not reconnect by itself: a drop is reported once through
+ * `onDisconnect` and the app shell owns the recovery (backoff, then the
+ * reset semantics of SPIKE-ACP §11 for an orphaned turn).
  */
 export class AcpClient {
   private tcp: socket.TCPSocket | null = null
@@ -42,10 +46,13 @@ export class AcpClient {
   private pending: Map<number, AcpPending> = new Map<number, AcpPending>()
   private state: LinkState = LinkState.IDLE
   private serverInfo: string = ''
+  /** Single-fire guard: 'error' and 'close' both fire for one drop. */
+  private dropped: boolean = false
 
   onState: ((state: LinkState, detail: string) => void) | null = null
   onUpdate: ((payload: AcpUpdatePayload) => void) | null = null
   onPermission: ((request: AcpPermissionRequest) => void) | null = null
+  onDisconnect: ((reason: string) => void) | null = null
 
   getState(): LinkState {
     return this.state
@@ -67,6 +74,7 @@ export class AcpClient {
     if (this.tcp !== null) {
       this.close()
     }
+    this.dropped = false
     this.setState(LinkState.CONNECTING, `127.0.0.1:${port}`)
     const tcp = socket.constructTCPSocketInstance()
     this.tcp = tcp
@@ -77,10 +85,12 @@ export class AcpClient {
     tcp.on('close', () => {
       this.failAll(new Error('bridge closed'))
       this.setState(LinkState.FAILED, 'bridge closed')
+      this.fireDisconnect('bridge closed')
     })
     tcp.on('error', (error: BusinessError) => {
       this.failAll(new Error(`bridge error ${error.code}`))
       this.setState(LinkState.FAILED, `socket ${error.code}`)
+      this.fireDisconnect(`socket ${error.code}`)
     })
 
     await tcp.bind({ address: '127.0.0.1', port: 0, family: 1 })
@@ -151,6 +161,17 @@ export class AcpClient {
   }
 
   /**
+   * Close a session: it enters `session/list` and can be `session/resume`d.
+   * Recovery closes an orphaned in-flight turn with this (SPIKE-ACP §11) —
+   * its prompt response is lost with the dropped socket and its updates
+   * carry no turn id, so the end of the turn is undetectable.
+   */
+  async sessionClose(sessionId: string): Promise<void> {
+    const params: AcpCloseParams = { sessionId: sessionId }
+    await this.request('session/close', params, 30000)
+  }
+
+  /**
    * Switch one config option. `value` for `model` is a JSON array string
    * (e.g. '["deepseek-official","deepseek-flash"]'); the response carries the
    * new authoritative `configOptions` — the option list shrinks as choices
@@ -184,6 +205,20 @@ export class AcpClient {
       this.tcp = null
     }
     this.setState(LinkState.IDLE, 'closed')
+  }
+
+  /**
+   * Report an unexpected transport drop exactly once (deliberate `close()`
+   * unregisters the handlers first, so it never reaches here).
+   */
+  private fireDisconnect(reason: string): void {
+    if (this.dropped) {
+      return
+    }
+    this.dropped = true
+    if (this.onDisconnect !== null) {
+      this.onDisconnect(reason)
+    }
   }
 
   private request(method: string, params: object | null, timeoutMs: number): Promise<object> {

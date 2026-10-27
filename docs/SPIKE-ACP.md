@@ -271,3 +271,23 @@ App 客户端真机验证（手机 read-only 多轮 + 平板 danger-full-access 
 
 > 未测：对孤儿轮发 `session/cancel`（通知）是否也能终止。若可行，可做「保留半截 + 显式中断」，
 > 但结束检测仍需客户端自己超时兜底。
+
+### 客户端落地（2026-10-27 真机闭环）
+
+上述语义已在 ArkTS 客户端实现并真机验证：
+
+- **AcpClient**（`model/AcpClient.ets`）只报掉线：`onDisconnect` 单发回调（`dropped` 守卫
+  保证 error/close 同一掉线只报一次；刻意 `close()` 先摘处理器故永不触发）。另提供
+  `sessionClose(sessionId)`（`session/close` 请求，30s 超时）供重置语义使用。
+- **恢复编排在 `pages/Index.ets`**：`handleAcpDisconnect`（记孤儿轮、清审批弹窗、追加
+  断连消息）→ `reconnectAcp`（退避 120s 起、×2、cap 300s、6 次尝试，connect + initialize
+  后进 `reattachAcp`）→ `reattachAcp` 分叉：无孤儿轮直接复附（对旧 sessionId prompt，
+  不 resume）；有孤儿轮走 §11 重置语义（close → resume → 标「已中断」）。链中再掉线经
+  `redispatchDisconnect` 排队，在 `finishReconnect` 重启退避循环，不丢事件。
+- **120s 首退避是刻意设计**：桥单客户端，App 过快回连会顶掉正在进行的短探针实验。
+- **真机验证（手机）**：外部探针抢占槽位后，App 按退避精确回连——断连 06:38:59.044 →
+  重连 06:40:59.076（**120.03s**，桥日志 `replacing previous client` 铁证），探针被顶下线，
+  断连/复附消息均持久化进 `dsh_sessions` 缓存。
+- **冻结注意**：息屏锁定下应用可能被系统冻结（kernel 照常 accept TCP，但应用不处理，
+  外部探针表现为连接成功却 30s 无响应）。长测前保活：`power-shell timeout -o 600000` +
+  `power-shell wakeup`；冻结解除后积压的 socket 事件会被集中处理。

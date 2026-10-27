@@ -183,9 +183,16 @@ ACP 实测契约（勿凭直觉改）：
   弹窗 + 流式气泡 + usage + 停止（cancel 通知）+ 模型选择器（选项集收缩适配）+ resume
   降级 + **权限三档选择器**（只读/平衡/宽松；danger-full-access 平板端到端零审批落盘，
   三档快照写入 session log）。审批弹窗为根 Stack 固定覆盖层（不在 transcript 流内，
-  早期「渲染进滚动流」记录是未提交中间态，已勘误）。已知待修：AcpClient 无断线重连；
-  桥为**单客户端**（新连接 `replacing previous client` 顶掉旧连接，外部探针实验后须
-  重启 App 恢复客户端）。
+  早期「渲染进滚动流」记录是未提交中间态，已勘误）。
+- **AcpClient 断线重连已交付并真机闭环（2026-10-27）**：客户端只报掉线（`onDisconnect`
+  单发，error/close 同一掉线只报一次），恢复编排在 `Index.ets`——首退避 120s、×2、
+  cap 300s、6 次尝试；无在跑轮次直接复附（对旧 sessionId prompt），孤儿轮走重置语义
+  （`session/close` 掐孤儿轮 → `session/resume` → 标记「已中断」由用户决定重发，见 §4.2
+  与 `docs/SPIKE-ACP.md` §11）。真机验证（手机）：断连 06:38:59.044 → 重连 06:40:59.076，
+  **精确 120.03s** 按设计夺回客户端槽位，断连/复附消息均落 `dsh_sessions` 缓存。
+  探针窗口注意：桥为**单客户端**（新连接 `replacing previous client` 顶掉旧连接），
+  App 会在 2 分钟内自动回连抢回槽位——外部 fport 探针单轮（≤2min）不受影响，更长的
+  外部实验须先 force-stop App，否则探针会被 App 的自动重连顶掉。
 - 真机序列号等本地信息只记在本地记忆（`.workbuddy-ai/memory/`，gitignored），**不写进公开仓库**。
 
 签名口径（开源卫生）：

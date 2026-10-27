@@ -74,6 +74,10 @@ export interface AcpCancelParams {
   sessionId: string
 }
 
+export interface AcpCloseParams {
+  sessionId: string
+}
+
 /**
  * Tolerant view of one config option. `options` is polymorphic on the wire:
  * `model` nests one level (`{group, name, options: [...]}`) while
