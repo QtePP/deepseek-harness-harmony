@@ -124,6 +124,47 @@ return hits
 工作量：**300 行左右**（vm 上下文 + 绑定 + 超时/输出上限）。风险：无隔离，模型代码跑在
 主进程里——需要 `vm` 的 timeout + 输出截断兜底；内存泄漏要防（每次跑完丢弃 context）。
 
+#### L2 交付记录（2026-10-27，P1①）✅ 本地闭环；真机验证待设备可用
+
+实现：`@ohos/dsh-ptc-runtime-vm`（随 `ohos` profile 分发）。每次 `run_code` 起一个
+**worker_thread**，在 worker 内用 `node:vm` 求值程序——不在主线程跑：sync 死循环用
+`worker.terminate()`（V8 TerminateExecution）硬杀，比 vm timeout 可靠；worker_threads
+不可用时 `run_code` 优雅返回 `kind: "worker-exit"`，不崩主进程。接线在
+`dsh-bundle-ohos`：deps 声明 + patch 禁 stock `ptc-runtime`（`dsh-ptc-runtime-node`）、
+`tools` 置 `config.mode: ptc`。
+
+实测契约（本地 E2E + 读源码所得，**勿凭直觉改**）：
+
+- **`mode` 枚举只有 `"native" | "ptc"`**（无 "sdk"；配 `sdk` 启动即
+  `ValidationError`）。`mode: ptc` 是**全坍缩**：`run_code` 成为模型唯一可直接调用的
+  工具（todo/create_goal 等也坍缩），其余工具全部进程序内 `tools.*` SDK（dsh-tools 自动
+  渲染 SDK section + PTC_ONLY_INSTRUCTION）。
+- **dsh-tools 的 binding 契约是 resolve=值 / reject=错误**（dsh-tools lib `return outcome.value`），
+  **不是返回 settle 对象**。主侧把 rejected Error 的 message 作为失败回给 worker，
+  worker 在 vm realm 内构造声明的错误类（如 `ToolCallError`）。
+- **cordis traceable 下 service 类禁用 `#private` 字段**：经 ctx 取到的 service 是
+  Proxy，方法调用 `this` = shadow proxy，V8 私有字段品牌检查必炸
+  （`Cannot read private member #x from an object whose class did not declare it`）。
+  用普通属性（stock `dsh-ptc-runtime-node` 也零私有字段）。
+- **amaro TS 擦除依赖 WASM** ⇒ `--jitless` 下不可用（实测报
+  `WebAssembly is not supported in this environment, but is required for TypeScript`）。
+  runtime 对外仍声明 `language: "typescript"`（SDK section/flavor 按它生成），但
+  `executionInstructions` 明示写纯 ECMAScript。
+- 契约基座：class extends `PtcRuntime`（`@deepseek-ai/dsh-ptc-runtime`，cordis Service）；
+  `resolve(request)` → spec（cwd 绝对、timeoutMs 钳制）；`run(spec)` →
+  `{value?, logs[], error?{kind,message}}`；kinds = exception / timeout / abort /
+  worker-exit / invalid-output / output-limit / protocol / sandbox-unavailable。
+
+验证：单测 22/22（`node --test` 与 `--jitless` 双跑，载荷树内）→ dump-config
+（`ptc-runtime` disabled、`tools` `mode: ptc`、`ptc-runtime-vm` 与 `tool-fs-search-ohos`
+插入）→ 冒烟 `deepseek-harness-acp` → **真实模型 E2E**：模型一次 `run_code` 调
+`tools.glob("**/*.txt")` 正确答 "3"，审批流（read-only 档越区读触发 `session/request_permission`
+→ `allow-once`）走通。
+
+真机待验清单：worker_threads 在 arm64/`--jitless` 的可用性（不可用则 `worker-exit`
+降级，需确认不频繁）、真机模型轮（run_code 数工作区文件）、contain-probe 回归
+（程序内工具仍受 workspace 收口）。
+
 ### L3 — 不可替代，认了
 
 | 能力 | 为什么不行 | 折中 |

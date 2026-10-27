@@ -34,6 +34,7 @@
 | **link-fallback** | 沙箱禁 hardlink（EACCES）⇒ `copyFile(COPYFILE_EXCL)` 降级，装配期注入 | `bootstrap.cjs` `installLinkFallback()` |
 | **840vp 断点** | ≥840vp：会话栏 + 对话双栏；<840vp：单栏，rail 收进 sheet | `entry/.../pages/Index.ets` |
 | **dsh-home** | 沙箱内运行时主目录：`bridge.log`、`bridge-status.json`、`sessions/`、`storages/` 等 | `NodeHost.ets` |
+| **ptc-runtime-vm / run_code** | in-process PTC 运行时（`@ohos/dsh-ptc-runtime-vm`，worker_threads + `node:vm`，随载荷分发）：`tools` 置 `mode: ptc` 后 `run_code` 是唯一直接可调工具，其余工具全坍缩进程序内 `tools.*` SDK；worker 不可用时优雅 `worker-exit` | `host/profile-ohos/.../@ohos/dsh-ptc-runtime-vm` |
 
 ## 3. 架构口径（四层关系）
 
@@ -145,10 +146,21 @@ ACP 实测契约（勿凭直觉改）：
 - 设备侧文件路径两种视角同目录：hdc shell `/data/app/el2/100/base/<bundle>/haps/entry/files/…`
   ⇄ App 内 `/data/storage/el2/base/haps/entry/files/…`（`context.filesDir`）。
 
-## 7. 当前状态（2026-10-26）
+## 7. 当前状态（2026-10-27）
 
 - 已交付并真机验证：冷启动恢复、会话 resume、文件预览（网页/图片/文本）、能力开关、
   项目分类（创建/切换真机验证，每项目独立 workspace）。
+- **in-process PTC 运行时已交付（2026-10-27，P1①，本地闭环；真机验证待设备可用）**：
+  `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
+  `dsh-bundle-ohos` patch 禁 stock `ptc-runtime` 并把 `tools` 置 `mode: ptc`——run_code 成为
+  唯一直接可调工具，其余工具全坍缩进程序内 `tools.*` SDK（glob/grep/read/web 等可达）。
+  本地闭环：单测 22/22（含 `--jitless`）+ dump-config + 冒烟 + **真实模型 E2E**
+  （run_code → `tools.glob("**/*.txt")` → 正确答 "3"，审批流走通）。三条实测契约写死在
+  `docs/GAP-ANALYSIS.md` §L2：dsh-tools binding 是 resolve=值/reject=错误（不是 settle
+  对象）；cordis traceable 下 service 类禁 `#private` 字段（方法 `this` 是 Proxy，品牌检查
+  必炸，用普通属性）；amaro TS 擦除依赖 WASM ⇒ jitless 下设备不能跑 TS，executionInstructions
+  明示写纯 JS。待真机：worker_threads 在 arm64/jitless 的可用性（不可用则 run_code 优雅
+  返回 `worker-exit`，不崩）、真机模型轮、contain-probe 回归。
 - **纯 JS 搜索插件已交付并真机闭环（2026-10-26，P0）**：自定义 `ohos` profile + bootstrap
   模板安装/acp→ohos 重映射；真机模型轮 `glob`/`grep` 真实命中（`danger-tablet-test.txt`），
   模型工具表无 bash/job_kill/job_list/job_output（P0a），权限三档快照不受影响；插件纯函数
@@ -199,13 +211,18 @@ ACP 实测契约（勿凭直觉改）：
 3. **部署**：`bash scripts/deploy.sh [serial]`（查设备 → 登录 → 签名缺失时生成 → 构建 → 装+启动，
    结束自动还原签名口径）。
 4. **验证**：`devecocli log`；应用内 设置 → 诊断；`uitest dumpLayout` + `hdc file recv` 做无头 UI 断言。
-   纯 JS 搜索插件的本地三段验证（装机前先过一遍，全绿再部署）：
-   - **单测**：必须在**载荷树内**跑——插件 `index.js` 依赖 `@deepseek-ai/schemastery`，
+   本地三段验证（装机前先过一遍，全绿再部署）：
+   - **单测**：必须在**载荷树内**跑——插件 `index.js` 依赖 `@deepseek-ai/schemastery` 等包，
      只有载荷根能解析，在仓库源目录直接跑会 `ERR_MODULE_NOT_FOUND`：
-     `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-tool-fs-search-js && node --test test/*.test.mjs`（38/38）。
+     `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-tool-fs-search-js && node --test test/*.test.mjs`（38/38）；
+     `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-ptc-runtime-vm && node --test test/*.test.mjs`（22/22，
+     加 `--jitless` 再跑一遍证明无 WASM 路径）。
    - **配置层**：`DSH_HOME=.build/ohos-e2e node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos --patch .build/payload/patches/ohos.patch.yml --dump-config`
-     → `tool-bash`/`tool-pwsh`/`tool-jobs`/`tool-fs-search` 均为 `disabled: true`，末行有
-     `- id: tool-fs-search-ohos`（`name: '@ohos/dsh-tool-fs-search-js'`）。
+     → `tool-bash`/`tool-pwsh`/`tool-jobs`/`tool-fs-search`/`ptc-runtime` 均为 `disabled: true`；
+     `tools` 行 `config.mode: ptc`；末尾有 `- id: tool-fs-search-ohos` 与 `- id: ptc-runtime-vm`。
+     **`--profile ohos` 读的是 `$DSH_HOME/profiles/ohos`（不自动安装）**：模板变更后必须先
+     `rm -rf .build/ohos-e2e/profiles/ohos && cp -R .build/payload/profile-ohos/profiles/ohos .build/ohos-e2e/profiles/ohos`
+     再跑 dump，否则读到旧模板出现假阴性。
      同一条命令对 `sdk` profile 会报 `patch: entry "skill-office" not found`——那是**预期噪音**：
      `skill-office` 只存在于 sdk 树，平台补丁两 profile 共用，不要为消警告删该行。
    - **启动冒烟**：`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}\n' | DSH_HOME=.build/ohos-e2e node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos`
