@@ -182,9 +182,10 @@ ACP 实测契约（勿凭直觉改）：
 - ArkTS ACP 客户端已交付（2026-10-26，手机+平板真机验证）：AcpProtocol/AcpClient + 审批
   弹窗 + 流式气泡 + usage + 停止（cancel 通知）+ 模型选择器（选项集收缩适配）+ resume
   降级 + **权限三档选择器**（只读/平衡/宽松；danger-full-access 平板端到端零审批落盘，
-  三档快照写入 session log）。已知待修：审批弹窗渲染进滚动流（应改固定覆盖层）、
-  AcpClient 无断线重连；桥为**单客户端**（新连接 `replacing previous client` 顶掉旧连接，
-  外部探针实验后须重启 App 恢复客户端）。
+  三档快照写入 session log）。审批弹窗为根 Stack 固定覆盖层（不在 transcript 流内，
+  早期「渲染进滚动流」记录是未提交中间态，已勘误）。已知待修：AcpClient 无断线重连；
+  桥为**单客户端**（新连接 `replacing previous client` 顶掉旧连接，外部探针实验后须
+  重启 App 恢复客户端）。
 - 真机序列号等本地信息只记在本地记忆（`.workbuddy-ai/memory/`，gitignored），**不写进公开仓库**。
 
 签名口径（开源卫生）：

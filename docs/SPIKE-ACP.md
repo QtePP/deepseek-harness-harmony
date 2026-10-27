@@ -234,7 +234,9 @@ App 客户端真机验证（手机 read-only 多轮 + 平板 danger-full-access 
   文件不落盘；服务端无自动放行。
 - **桥是单客户端**：新连接 `replacing previous client` 顶掉旧连接——外部探针实验后必须
   重启 App 恢复客户端连接（AcpClient 暂无重连）。
-- 已知 UI 缺陷：审批弹窗渲染进 transcript 滚动流，自动滚动可将其推出视口（应改固定覆盖层）。
+- 审批弹窗即根 Stack 固定覆盖层（`Index.ets` `if (approvalVisible)` 块，遮罩+居中卡片），
+  不在 transcript 流内，自动滚动推不出视口；早期「渲染进滚动流」的记录描述的是未提交的
+  中间态，落盘代码从未如此。
 
 ---
 
