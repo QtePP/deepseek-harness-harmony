@@ -798,6 +798,12 @@ struct Index {
       return
     }
     await AppConfig.save(this.context, key, model)
+    // ACP/ohos runs the credentials-live plugin: the staged key hot-publishes
+    // within ~2s. SDK keeps the boot-frozen env; only a restart picks it up.
+    this.getUIContext().getPromptAction().showToast({
+      message: this.host.isAcp() ? '已保存，新密钥即将生效' : '已保存，重启应用后生效',
+      duration: 2000
+    })
     this.showSettings = false
   }
 

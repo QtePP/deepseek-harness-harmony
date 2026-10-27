@@ -35,6 +35,7 @@
 | **840vp 断点** | ≥840vp：会话栏 + 对话双栏；<840vp：单栏，rail 收进 sheet | `entry/.../pages/Index.ets` |
 | **dsh-home** | 沙箱内运行时主目录：`bridge.log`、`bridge-status.json`、`sessions/`、`storages/` 等 | `NodeHost.ets` |
 | **ptc-runtime-vm / run_code** | in-process PTC 运行时（`@ohos/dsh-ptc-runtime-vm`，worker_threads + `node:vm`，随载荷分发）：`tools` 置 `mode: ptc` 后 `run_code` 是唯一直接可调工具，其余工具全坍缩进程序内 `tools.*` SDK；worker 不可用时优雅 `worker-exit` | `host/profile-ohos/.../@ohos/dsh-ptc-runtime-vm` |
+| **credentials-live / 密钥热更新** | `@ohos/dsh-credentials-live`（随载荷分发，ohos profile 专属）：目录级 fs.watch + 1.5s 轮询 `<dsh-home>/.api-key`，变化经 `credentials.set()/unset()` 热发布。dsh 启动期冻结 env 快照（`loadLayeredEnv` 拷 `process.env`），运行中改 env 永远无效——这是唯一热路径；Settings 保存密钥 ~2s 生效无需重启（ACP 路径；SDK profile 无此插件，重启生效） | `host/profile-ohos/.../@ohos/dsh-credentials-live` |
 
 ## 3. 架构口径（四层关系）
 
@@ -162,6 +163,18 @@ ACP 实测契约（勿凭直觉改）：
   （不是 settle 对象）；cordis traceable 下 service 类禁 `#private` 字段（方法 `this` 是
   Proxy，品牌检查必炸，用普通属性）；amaro TS 擦除依赖 WASM ⇒ jitless 下设备不能跑 TS，
   executionInstructions 明示写纯 JS。
+- **API 密钥热更新已交付并真机闭环（2026-10-27）**：`@ohos/dsh-credentials-live`
+  挂进 `ohos` profile（bundle `dependencies` + `cordis.patch.yml` insert 双登记），真机
+  bridge.log 实证 `[credentials-live] watching <dsh-home>/.api-key (dir-watch + poll every
+  1500ms)` + `boot: ohos runtime mounted`——目录级 fs.watch（inotify）在应用沙箱可用。
+  根因链：dsh 启动期 `loadLayeredEnv` 冻结 env 快照 ⇒ 运行中改 `process.env` 无效；外部改
+  `.credentials.yaml` 需 0600/锁配合（`assertOwnerOnly`）且有竞态——都不如暂存文件轮询 +
+  `credentials.set()`（provider 自身 set/unset 直更内存快照 + notifyUpdated，不经 watcher）。
+  ArkTS 侧：`AppConfig.save` 以 temp+rename 原子写 `.api-key`（清 key 删文件）；`NodeHost`
+  启动对空 key 删陈旧暂存（修跨重启清 key 失效 bug）；Settings 保存 toast 按 `host.isAcp()`
+  分「即将生效」/「重启生效」。单测 8/8（载荷树内）+ 回归 fs-search 38/38、ptc 22/22
+  （含 `--jitless`）+ dump-config（`credentials-live-ohos` 挂载、五处 disabled、`mode: ptc`）
+  + 冒烟。
 - **纯 JS 搜索插件已交付并真机闭环（2026-10-26，P0）**：自定义 `ohos` profile + bootstrap
   模板安装/acp→ohos 重映射；真机模型轮 `glob`/`grep` 真实命中（`danger-tablet-test.txt`），
   模型工具表无 bash/job_kill/job_list/job_output（P0a），权限三档快照不受影响；插件纯函数
@@ -225,10 +238,11 @@ ACP 实测契约（勿凭直觉改）：
      只有载荷根能解析，在仓库源目录直接跑会 `ERR_MODULE_NOT_FOUND`：
      `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-tool-fs-search-js && node --test test/*.test.mjs`（38/38）；
      `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-ptc-runtime-vm && node --test test/*.test.mjs`（22/22，
-     加 `--jitless` 再跑一遍证明无 WASM 路径）。
+     加 `--jitless` 再跑一遍证明无 WASM 路径）；
+     `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-credentials-live && node --test test/*.test.mjs`（8/8）。
    - **配置层**：`DSH_HOME=.build/ohos-e2e node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos --patch .build/payload/patches/ohos.patch.yml --dump-config`
      → `tool-bash`/`tool-pwsh`/`tool-jobs`/`tool-fs-search`/`ptc-runtime` 均为 `disabled: true`；
-     `tools` 行 `config.mode: ptc`；末尾有 `- id: tool-fs-search-ohos` 与 `- id: ptc-runtime-vm`。
+     `tools` 行 `config.mode: ptc`；末尾有 `- id: tool-fs-search-ohos`、`- id: ptc-runtime-vm` 与 `- id: credentials-live-ohos`。
      **`--profile ohos` 读的是 `$DSH_HOME/profiles/ohos`（不自动安装）**：模板变更后必须先
      `rm -rf .build/ohos-e2e/profiles/ohos && cp -R .build/payload/profile-ohos/profiles/ohos .build/ohos-e2e/profiles/ohos`
      再跑 dump，否则读到旧模板出现假阴性。

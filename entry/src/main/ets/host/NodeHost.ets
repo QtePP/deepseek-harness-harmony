@@ -113,6 +113,10 @@ export class NodeHost {
             // No chmod here: @ohos.file.fs exposes no permission API. The
             // sandbox already isolates per-uid; bootstrap.cjs tightens the
             // file to 0600 as soon as Node is up (and keeps it there).
+          } else if (fs.accessSync(keyPath)) {
+            // A cleared key must not resurrect through a stale staged file:
+            // the credentials-live plugin and bootstrap both read this path.
+            fs.unlinkSync(keyPath)
           }
         } catch (error) {
           // A missing key file only degrades to "no credentials"; never block boot.

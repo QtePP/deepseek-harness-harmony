@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit'
 import { preferences } from '@kit.ArkData'
 import { util } from '@kit.ArkTS'
 import { BusinessError } from '@kit.BasicServicesKit'
+import { fileIo as fs } from '@kit.CoreFileKit'
 
 interface SecretsFile {
   deepseekApiKey?: string
@@ -62,6 +63,40 @@ export class AppConfig {
     await AppConfig.store.put('api_key', AppConfig.apiKey)
     await AppConfig.store.put('model', AppConfig.model)
     await AppConfig.store.flush()
+    AppConfig.stageApiKey(context)
+  }
+
+  /**
+   * Mirror the saved key into `<filesDir>/dsh-home/.api-key`. The ohos
+   * profile's credentials-live plugin watches that file and pushes changes
+   * through the credentials service, so a key saved mid-session takes effect
+   * without a restart (ACP path); the next boot re-seeds it via DSH_KEY_FILE.
+   */
+  private static stageApiKey(context: common.UIAbilityContext): void {
+    const home = `${context.filesDir}/dsh-home`
+    if (!fs.accessSync(home)) {
+      // Pre-boot save: nothing to notify yet, boot writes the staged file.
+      return
+    }
+    const keyPath = `${home}/.api-key`
+    try {
+      if (AppConfig.apiKey.length === 0) {
+        // Cleared: drop the staged file so the live plugin clears the store
+        // and the next boot stops seeding the env fallback.
+        if (fs.accessSync(keyPath)) {
+          fs.unlinkSync(keyPath)
+        }
+        return
+      }
+      // Atomic replace: a concurrent poller never observes a torn value.
+      const tmpPath = `${home}/.api-key.tmp`
+      const file = fs.openSync(tmpPath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC)
+      fs.writeSync(file.fd, AppConfig.apiKey)
+      fs.closeSync(file)
+      fs.renameSync(tmpPath, keyPath)
+    } catch (error) {
+      // Staging is best-effort; boot falls back to the same value from prefs.
+    }
   }
 
   /** Both profile and approval tier are read by bootstrap at boot, not live. */
