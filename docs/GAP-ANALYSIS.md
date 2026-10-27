@@ -124,7 +124,7 @@ return hits
 工作量：**300 行左右**（vm 上下文 + 绑定 + 超时/输出上限）。风险：无隔离，模型代码跑在
 主进程里——需要 `vm` 的 timeout + 输出截断兜底；内存泄漏要防（每次跑完丢弃 context）。
 
-#### L2 交付记录（2026-10-27，P1①）✅ 本地闭环；真机验证待设备可用
+#### L2 交付记录（2026-10-27，P1①）✅ 已交付并真机闭环（手机）
 
 实现：`@ohos/dsh-ptc-runtime-vm`（随 `ohos` profile 分发）。每次 `run_code` 起一个
 **worker_thread**，在 worker 内用 `node:vm` 求值程序——不在主线程跑：sync 死循环用
@@ -161,9 +161,10 @@ return hits
 `tools.glob("**/*.txt")` 正确答 "3"，审批流（read-only 档越区读触发 `session/request_permission`
 → `allow-once`）走通。
 
-真机待验清单：worker_threads 在 arm64/`--jitless` 的可用性（不可用则 `worker-exit`
-降级，需确认不频繁）、真机模型轮（run_code 数工作区文件）、contain-probe 回归
-（程序内工具仍受 workspace 收口）。
+真机闭环（手机 2026-10-27）：worker_threads 在 arm64/`--jitless` 真机可用；模型一个
+run_code 程序内 `tools.write`×3 + `tools.glob` 计数正确答 "4"（workspace-write 档工作区内
+直写零审批）；contain-probe 回归——程序内 `grep` path=`..` 仍被收口拒绝
+（`grep path escapes the session workspace`）。
 
 ### L3 — 不可替代，认了
 

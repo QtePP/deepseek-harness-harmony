@@ -150,17 +150,18 @@ ACP 实测契约（勿凭直觉改）：
 
 - 已交付并真机验证：冷启动恢复、会话 resume、文件预览（网页/图片/文本）、能力开关、
   项目分类（创建/切换真机验证，每项目独立 workspace）。
-- **in-process PTC 运行时已交付（2026-10-27，P1①，本地闭环；真机验证待设备可用）**：
+- **in-process PTC 运行时已交付并真机闭环（2026-10-27，P1①）**：
   `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
   `dsh-bundle-ohos` patch 禁 stock `ptc-runtime` 并把 `tools` 置 `mode: ptc`——run_code 成为
   唯一直接可调工具，其余工具全坍缩进程序内 `tools.*` SDK（glob/grep/read/web 等可达）。
-  本地闭环：单测 22/22（含 `--jitless`）+ dump-config + 冒烟 + **真实模型 E2E**
-  （run_code → `tools.glob("**/*.txt")` → 正确答 "3"，审批流走通）。三条实测契约写死在
-  `docs/GAP-ANALYSIS.md` §L2：dsh-tools binding 是 resolve=值/reject=错误（不是 settle
-  对象）；cordis traceable 下 service 类禁 `#private` 字段（方法 `this` 是 Proxy，品牌检查
-  必炸，用普通属性）；amaro TS 擦除依赖 WASM ⇒ jitless 下设备不能跑 TS，executionInstructions
-  明示写纯 JS。待真机：worker_threads 在 arm64/jitless 的可用性（不可用则 run_code 优雅
-  返回 `worker-exit`，不崩）、真机模型轮、contain-probe 回归。
+  真机（手机 2026-10-27）全绿：worker_threads 在 arm64/`--jitless` 可用；模型一个 run_code
+  程序内 `tools.write`×3 + `tools.glob` 计数正确答 "4"；contain-probe 回归——程序内
+  `grep` path=`..` 仍被收口拒绝（`grep path escapes the session workspace`）。本地：
+  单测 22/22（含 `--jitless`）+ dump-config + 冒烟 + 真实模型 E2E（`tools.glob` → "3"）。
+  三条实测契约写死在 `docs/GAP-ANALYSIS.md` §L2：dsh-tools binding 是 resolve=值/reject=错误
+  （不是 settle 对象）；cordis traceable 下 service 类禁 `#private` 字段（方法 `this` 是
+  Proxy，品牌检查必炸，用普通属性）；amaro TS 擦除依赖 WASM ⇒ jitless 下设备不能跑 TS，
+  executionInstructions 明示写纯 JS。
 - **纯 JS 搜索插件已交付并真机闭环（2026-10-26，P0）**：自定义 `ohos` profile + bootstrap
   模板安装/acp→ohos 重映射；真机模型轮 `glob`/`grep` 真实命中（`danger-tablet-test.txt`），
   模型工具表无 bash/job_kill/job_list/job_output（P0a），权限三档快照不受影响；插件纯函数
