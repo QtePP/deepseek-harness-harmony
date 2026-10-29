@@ -30,9 +30,22 @@ export interface AcpAgentInfo {
   version?: string
 }
 
+export interface AcpPromptCapabilities {
+  image?: boolean
+  audio?: boolean
+  embeddedContext?: boolean
+}
+
+export interface AcpAgentCapabilities {
+  mcpCapabilities?: object
+  promptCapabilities?: AcpPromptCapabilities
+  sessionCapabilities?: object
+}
+
 export interface AcpInitializeResult {
   protocolVersion?: number
   agentInfo?: AcpAgentInfo
+  agentCapabilities?: AcpAgentCapabilities
 }
 
 export interface AcpSessionNewParams {
@@ -51,9 +64,16 @@ export interface AcpPromptParams {
   prompt: AcpContentBlock[]
 }
 
+/**
+ * One prompt block. Text turns are `{type:'text', text}`; inline images are
+ * `{type:'image', data: <canonical-base64>, mimeType: image/png|jpeg|webp|gif}`
+ * (server contract: no base64 aliases, no other raster MIME types).
+ */
 export interface AcpContentBlock {
   type: string
-  text: string
+  text?: string
+  data?: string
+  mimeType?: string
 }
 
 export interface AcpPromptResult {
@@ -119,17 +139,55 @@ export interface AcpContentLike {
   text?: string
 }
 
+/** One entry of a `tool_call_update` content list: `{type:'content', content:{type,text}}`. */
+export interface AcpToolContentItem {
+  type?: string
+  content?: AcpContentLike
+}
+
 export interface AcpUpdateBody {
   sessionUpdate?: string
   type?: string
   messageId?: string
-  content?: AcpContentLike
+  /**
+   * Polymorphic on the wire: a single `{type,text}` block for message and
+   * thought chunks, an array of content items for `tool_call_update`. Read it
+   * through {@link textOfUpdateContent} / {@link toolTextOfUpdateContent}.
+   */
+  content?: Object
   toolCallId?: string
   toolKind?: string
   title?: string
   status?: string
   used?: number
   size?: number
+  /** `tool_call` arguments, already parsed by the server; shape is tool-specific. */
+  rawInput?: Record<string, Object>
+}
+
+/** Text of a single-block `content` (message / thought chunks); '' otherwise. */
+export function textOfUpdateContent(content: Object | undefined): string {
+  if (content === undefined || content === null || Array.isArray(content)) {
+    return ''
+  }
+  const block = content as AcpContentLike
+  return block.text === undefined ? '' : block.text
+}
+
+/** Flattened text of a `tool_call_update` content array; '' when absent. */
+export function toolTextOfUpdateContent(content: Object | undefined): string {
+  if (content === undefined || content === null || !Array.isArray(content)) {
+    return ''
+  }
+  const items = content as AcpToolContentItem[]
+  let out = ''
+  for (const item of items) {
+    if (item.content === undefined || item.content.text === undefined) {
+      continue
+    }
+    out += item.content.text
+  }
+  return out
 }
 
 export interface AcpUpdatePayload {

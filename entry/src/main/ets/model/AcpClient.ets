@@ -46,6 +46,8 @@ export class AcpClient {
   private pending: Map<number, AcpPending> = new Map<number, AcpPending>()
   private state: LinkState = LinkState.IDLE
   private serverInfo: string = ''
+  /** Connection-level inline-image admission, frozen by `initialize`. */
+  private imagePrompts: boolean = false
   /** Single-fire guard: 'error' and 'close' both fire for one drop. */
   private dropped: boolean = false
 
@@ -60,6 +62,16 @@ export class AcpClient {
 
   getServerInfo(): string {
     return this.serverInfo
+  }
+
+  /**
+   * Whether this connection admits inline image prompts at all. Frozen by
+   * `initialize` from the boot-time default model: switching a session to a
+   * vision model afterwards does NOT reopen it — a false here needs the
+   * default model fixed and the app restarted.
+   */
+  getImagePrompts(): boolean {
+    return this.imagePrompts
   }
 
   private setState(state: LinkState, detail: string): void {
@@ -113,6 +125,14 @@ export class AcpClient {
       const version = agent.version === undefined ? '' : agent.version
       this.serverInfo = `${name} ${version}`.trim()
     }
+    this.imagePrompts = false
+    const capabilities = typed.agentCapabilities
+    if (capabilities !== undefined) {
+      const promptCapabilities = capabilities.promptCapabilities
+      if (promptCapabilities !== undefined && promptCapabilities.image === true) {
+        this.imagePrompts = true
+      }
+    }
     return typed
   }
 
@@ -139,11 +159,20 @@ export class AcpClient {
    * (`end_turn` / `cancelled`). Stream content arrives as session/update
    * notifications while this promise is pending.
    */
-  async sessionPrompt(sessionId: string, text: string): Promise<AcpPromptResult> {
-    const block: AcpContentBlock = { type: 'text', text: text }
-    const params: AcpPromptParams = { sessionId: sessionId, prompt: [block] }
+  /**
+   * Run one full turn with explicit content blocks (text and/or inline
+   * images); resolves when the server answers `{stopReason}`. Stream content
+   * arrives as session/update notifications while this promise is pending.
+   */
+  async sessionPromptBlocks(sessionId: string, blocks: AcpContentBlock[]): Promise<AcpPromptResult> {
+    const params: AcpPromptParams = { sessionId: sessionId, prompt: blocks }
     const result = await this.request('session/prompt', params, 600000)
     return result as AcpPromptResult
+  }
+
+  async sessionPrompt(sessionId: string, text: string): Promise<AcpPromptResult> {
+    const block: AcpContentBlock = { type: 'text', text: text }
+    return this.sessionPromptBlocks(sessionId, [block])
   }
 
   /**

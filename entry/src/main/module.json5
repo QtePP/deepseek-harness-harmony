@@ -17,6 +17,16 @@
       },
       {
         "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
+        "name": "ohos.permission.FILE_ACCESS_PERSIST",
+        "reason": "$string:dir_grant_perm_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
       }
     ],
     "pages": "$profile:main_pages",
@@ -37,6 +47,23 @@
             ],
             "actions": [
               "ohos.want.action.home"
+            ]
+          },
+          {
+            "actions": [
+              "ohos.want.action.sendData"
+            ],
+            "uris": [
+              {
+                "scheme": "file",
+                "utd": "general.text",
+                "maxFileSupported": 1
+              },
+              {
+                "scheme": "file",
+                "utd": "general.image",
+                "maxFileSupported": 1
+              }
             ]
           }
         ]

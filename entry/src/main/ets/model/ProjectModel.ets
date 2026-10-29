@@ -8,6 +8,12 @@ export interface ProjectSummary {
   id: string
   name: string
   updatedAt: number
+  /** Persisted grant URI of a user-chosen directory ('' when sandboxed). */
+  boundUri?: string
+  /** Real path of the granted directory (FileUri conversion at grant time). */
+  boundPath?: string
+  /** Display name of the granted directory (for menus and toasts). */
+  boundLabel?: string
 }
 
 /**
@@ -89,6 +95,46 @@ export class ProjectStore {
       }
     }
     await this.writeIndex(index)
+  }
+
+  /** Bind a user-granted directory as this project's workspace. */
+  async bindDir(id: string, uri: string, dirPath: string, label: string): Promise<void> {
+    const index = await this.readIndex()
+    for (const row of index) {
+      if (row.id === id) {
+        row.boundUri = uri
+        row.boundPath = dirPath
+        row.boundLabel = label
+        row.updatedAt = Date.now()
+        break
+      }
+    }
+    await this.writeIndex(index)
+  }
+
+  /** Drop the directory binding; the project falls back to its sandbox dir. */
+  async unbindDir(id: string): Promise<void> {
+    const index = await this.readIndex()
+    for (const row of index) {
+      if (row.id === id) {
+        row.boundUri = ''
+        row.boundPath = ''
+        row.boundLabel = ''
+        break
+      }
+    }
+    await this.writeIndex(index)
+  }
+
+  /** All persisted grant URIs across projects, for boot-time activation. */
+  async boundUris(): Promise<string[]> {
+    const uris: string[] = []
+    for (const row of await this.readIndex()) {
+      if (row.boundUri !== undefined && row.boundUri.length > 0) {
+        uris.push(row.boundUri)
+      }
+    }
+    return uris
   }
 
   /**

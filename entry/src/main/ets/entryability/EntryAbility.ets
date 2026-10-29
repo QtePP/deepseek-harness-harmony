@@ -1,6 +1,7 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { ShareInbox } from '../model/ShareInbox';
 
 const DOMAIN = 0x0000;
 
@@ -11,7 +12,14 @@ export default class EntryAbility extends UIAbility {
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
+    // Share targets arrive through the want; plain launches reject inside.
+    void ShareInbox.handleWant(want, this.context);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+  }
+
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    void ShareInbox.handleWant(want, this.context);
+    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onNewWant');
   }
 
   onDestroy(): void {
