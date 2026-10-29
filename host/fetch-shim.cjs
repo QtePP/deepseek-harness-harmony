@@ -188,7 +188,10 @@ function toStream(res) {
     start(controller) {
       res.on('data', (chunk) => controller.enqueue(new Uint8Array(chunk)))
       res.on('end', () => controller.close())
-      res.on('error', (error) => controller.error(error))
+      res.on('error', (error) => {
+        console.error(`fetch-shim: response stream failed: ${(error && error.stack) || error}`)
+        controller.error(error)
+      })
     },
     cancel() {
       res.destroy()
@@ -270,7 +273,10 @@ function fetchImpl(input, init) {
       }))
     })
 
-    request.on('error', (error) => reject(error))
+    request.on('error', (error) => {
+      console.error(`fetch-shim: request to ${url.host}${url.pathname} failed: ${(error && error.stack) || error}`)
+      reject(error)
+    })
     if (signal) {
       const abort = () => {
         request.destroy(new DOMExceptionLike('The operation was aborted.', 'AbortError'))

@@ -35,3 +35,15 @@
 # job_* 工具族依赖子进程派生，鸿蒙上必然失败，同样整族收敛到单行禁用。
 - id: tool-jobs
   disabled: true
+
+# 默认模型改为多模态 flash：acp-app 捆绑补丁写死 model: deepseek-v4-flash（纯文本），
+# 而 initialize 的 promptCapabilities.image 按启动默认模型冻结——不改这行，
+# 内联图片 prompt 永远被 "not advertised by this connection" 拒绝（-32602）。
+# deepseek-flash = DeepSeek-V4.1-Flash，目录里唯一 inputModalities 含 image 的模型。
+# 会话内仍可经模型选择器切换；此处只决定连接级图片准入。
+# 注意：loader 的 id 补丁是整段替换 config（不是深合并），provider 必须一并写回，
+# 否则 dsh-acp 的 supportsAcpImagePrompts 见 provider undefined 直接 false。
+- id: acp
+  config:
+    provider: deepseek-official
+    model: deepseek-flash

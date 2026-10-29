@@ -387,6 +387,270 @@ function installLinkFallback() {
 }
 
 /**
+ * The HarmonyOS sandbox only vouches for paths below the app files root, but
+ * dsh-attachment-local's durability walk (`ensureDurableHome`) opens every
+ * ancestor of DSH_HOME read-only and fsyncs it, up to the filesystem root —
+ * ancestors like /data refuse the open (EACCES), which surfaces as
+ * "unable to persist the prompt image batch" on every inline-image prompt.
+ * A refused read-only open of a directory gets a stub handle whose sync() is
+ * a no-op, and a denied fsync on a directory fd is swallowed; file fsyncs
+ * keep failing loudly. Must run before any ESM import of node:fs/promises
+ * for the same named-binding reason as the link fallback.
+ */
+function installDirSyncFallback() {
+  const fsp = require('node:fs/promises')
+  const fsSync = require('node:fs')
+  const oReadOnly = fsSync.constants.O_RDONLY
+  if (typeof fsp.open === 'function') {
+    const originalOpen = fsp.open
+    fsp.open = async function openSandboxAware(target, flags, mode) {
+      try {
+        return await originalOpen(target, flags, mode)
+      } catch (error) {
+        const code = error && error.code
+        if (code !== 'EACCES' && code !== 'EPERM' && code !== 'EISDIR') throw error
+        if (flags !== undefined && flags !== oReadOnly && flags !== 'r') throw error
+        let isDirectory = true
+        try {
+          isDirectory = fsSync.statSync(target).isDirectory()
+        } catch {
+          /* Unstatable ancestor: only the durability walk opens such paths read-only. */
+        }
+        if (!isDirectory) throw error
+        log(`fs.open dir fallback (sandbox denied): ${target}`)
+        return {
+          sync: async () => {},
+          close: async () => {}
+        }
+      }
+    }
+  }
+}
+
+/**
+ * `require('node:fs/promises').FileHandle` is undefined on this Node line
+ * (the class is not exported through the CJS namespace), so prototype
+ * patches that go through `fsp.FileHandle` are dead code and never wrap
+ * anything. Recover the real prototype from a live `fsp.open()` instance
+ * (a probe file in the sandbox tmp dir), then apply the handle-level
+ * fallbacks:
+ * - `sync()`: directory fsync is denied by the sandbox (EINVAL/EACCES/...)
+ *   and by the userfile mount; swallow it for directories only.
+ * - `chmod()/chown()`: the userfile mount under /storage/Users does not
+ *   implement POSIX mode/owner changes (fchmod answers EPERM, sdcardfs
+ *   semantics); swallow permission errors for descriptors that live on
+ *   that mount, rethrow everything else.
+ */
+function installFileHandleFallbacks() {
+  const fsp = require('node:fs/promises')
+  const fsSync = require('node:fs')
+  const nodeOs = require('node:os')
+  const nodePath = require('node:path')
+  const MOUNT_PREFIX = '/storage/Users/'
+  const tolerantCodes = new Set(['EPERM', 'EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP'])
+  const isUserStoragePath = (target) => typeof target === 'string' && target.startsWith(MOUNT_PREFIX)
+  const isTolerant = (error) => error !== null && error !== undefined && tolerantCodes.has(error.code)
+  const fdPath = (fd) => {
+    try {
+      return fsSync.readlinkSync(`/proc/self/fd/${fd}`)
+    } catch {
+      return ''
+    }
+  }
+  Promise.resolve().then(async () => {
+    const probePath = nodePath.join(nodeOs.tmpdir(), `.fh-probe-${process.pid}`)
+    let handle
+    try {
+      handle = await fsp.open(probePath, 'w')
+    } catch (error) {
+      log(`FileHandle probe failed: ${error && error.message}`)
+      return
+    }
+    try {
+      const proto = Object.getPrototypeOf(handle)
+      if (proto && typeof proto.sync === 'function') {
+        const originalSync = proto.sync
+        proto.sync = async function syncMountAware() {
+          try {
+            return await originalSync.call(this)
+          } catch (error) {
+            const code = error && error.code
+            if (code !== 'EINVAL' && code !== 'EACCES' && code !== 'EPERM' && code !== 'EROFS') throw error
+            let isDirectory = false
+            try {
+              isDirectory = fsSync.fstatSync(this.fd).isDirectory()
+            } catch {
+              isDirectory = false
+            }
+            if (!isDirectory) throw error
+            log(`fsync dir fallback (denied): fd=${this.fd}`)
+          }
+        }
+      }
+      for (const name of ['chmod', 'chown']) {
+        if (!proto || typeof proto[name] !== 'function') continue
+        const original = proto[name]
+        proto[name] = async function mountAware(...args) {
+          try {
+            return await original.call(this, ...args)
+          } catch (error) {
+            if (!isTolerant(error)) throw error
+            const path = fdPath(this.fd)
+            if (!isUserStoragePath(path)) throw error
+            log(`FileHandle.${name} fallback (userfile mount denies mode/owner changes): ${path}`)
+          }
+        }
+      }
+    } finally {
+      try {
+        await handle.close()
+      } catch {
+        /* probe close race is irrelevant */
+      }
+      try {
+        fsSync.unlinkSync(probePath)
+      } catch {
+        /* probe cleanup is best-effort */
+      }
+    }
+  })
+}
+
+/**
+ * `/storage/Users/<user>/...` is the userfile mount the document picker
+ * grants access to. The mount does not implement POSIX chmod/chown and
+ * answers EPERM for every attempt (sdcardfs/FUSE semantics, same as Android
+ * user storage). dsh-fs-local's atomic write stages through
+ * `mkdir .tmpdir -> chmod 0700 -> open wx -> handle.chmod 0600`, so every
+ * write tool call into a bound user directory dies at the first chmod.
+ * Wrap the chmod/chown families: permission errors under the mount resolve
+ * as no-ops (the mount enforces its own uniform ACL model); anything else
+ * rethrows loudly.
+ */
+function installUserStorageChmodFallback() {
+  const fsp = require('node:fs/promises')
+  const fsSync = require('node:fs')
+  const MOUNT_PREFIX = '/storage/Users/'
+  const tolerantCodes = new Set(['EPERM', 'EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP'])
+  const isUserStoragePath = (target) => typeof target === 'string' && target.startsWith(MOUNT_PREFIX)
+  const isTolerant = (error) => error !== null && error !== undefined && tolerantCodes.has(error.code)
+  for (const name of ['chmod', 'chown']) {
+    if (typeof fsp[name] === 'function') {
+      const original = fsp[name]
+      fsp[name] = function userStorageAware(target, ...rest) {
+        return original.call(fsp, target, ...rest).catch((error) => {
+          if (!isTolerant(error) || !isUserStoragePath(target)) throw error
+          log(`fsp.${name} fallback (userfile mount denies mode/owner changes): ${target}`)
+        })
+      }
+    }
+      if (typeof fsSync[`${name}Sync`] === 'function') {
+        const syncName = `${name}Sync`
+        const original = fsSync[syncName]
+        fsSync[syncName] = function userStorageAwareSync(target, ...rest) {
+          try {
+            return original.call(fsSync, target, ...rest)
+          } catch (error) {
+            if (!isTolerant(error) || !isUserStoragePath(target)) throw error
+            log(`fs.${syncName} fallback (userfile mount denies mode/owner changes): ${target}`)
+          }
+        }
+      }
+  }
+}
+
+/**
+ * libuv's copyFile tries a FICLONE (reflink) ioctl first; the userfile
+ * mount (HMDFS under /storage/Users) answers EPERM for it and libuv
+ * surfaces the failure instead of falling back to its userland loop.
+ * dsh-fs-local publishes new files as `link tmp -> final` (EXCL guard),
+ * the link fallback above already downgrades that to
+ * copyFile(COPYFILE_EXCL) — so on the userfile mount every file create
+ * dies right there. Route copyFile with a userfile endpoint through an
+ * explicit read/write loop (COPYFILE_EXCL preserved via `wx`); everything
+ * else keeps the native fast path.
+ */
+function installUserStorageCopyFallback() {
+  const fsp = require('node:fs/promises')
+  const fsSync = require('node:fs')
+  const MOUNT_PREFIX = '/storage/Users/'
+  const CHUNK = 1024 * 1024
+  const copyfileExcl = fsSync.constants.COPYFILE_EXCL
+  const isUserStoragePath = (target) => typeof target === 'string' && target.startsWith(MOUNT_PREFIX)
+  async function userlandCopy(src, dst, mode) {
+    const excl = mode !== undefined && (mode & copyfileExcl) !== 0
+    let srcHandle
+    let dstHandle
+    try {
+      srcHandle = await fsp.open(src, 'r')
+      dstHandle = await fsp.open(dst, excl ? 'wx' : 'w')
+      const buffer = Buffer.allocUnsafe(CHUNK)
+      let position = 0
+      for (;;) {
+        const { bytesRead } = await srcHandle.read(buffer, 0, CHUNK, position)
+        if (bytesRead === 0) break
+        await dstHandle.write(buffer, 0, bytesRead, position)
+        position += bytesRead
+      }
+    } finally {
+      if (dstHandle) {
+        try {
+          await dstHandle.close()
+        } catch {
+          /* best-effort close */
+        }
+      }
+      if (srcHandle) {
+        try {
+          await srcHandle.close()
+        } catch {
+          /* best-effort close */
+        }
+      }
+    }
+  }
+  function userlandCopySync(src, dst, mode) {
+    const excl = mode !== undefined && (mode & copyfileExcl) !== 0
+    const srcFd = fsSync.openSync(src, 'r')
+    let dstFd
+    try {
+      dstFd = fsSync.openSync(dst, excl ? 'wx' : 'w')
+      const buffer = Buffer.allocUnsafe(CHUNK)
+      let position = 0
+      for (;;) {
+        const bytesRead = fsSync.readSync(srcFd, buffer, 0, CHUNK, position)
+        if (bytesRead === 0) break
+        fsSync.writeSync(dstFd, buffer, 0, bytesRead, position)
+        position += bytesRead
+      }
+    } finally {
+      if (dstFd !== undefined) fsSync.closeSync(dstFd)
+      fsSync.closeSync(srcFd)
+    }
+  }
+  if (typeof fsp.copyFile === 'function') {
+    const original = fsp.copyFile
+    fsp.copyFile = async function userStorageAwareCopy(src, dst, mode) {
+      if (isUserStoragePath(src) || isUserStoragePath(dst)) {
+        log(`fsp.copyFile fallback (userland loop, userfile mount): ${src} -> ${dst}`)
+        return userlandCopy(src, dst, mode)
+      }
+      return original.call(fsp, src, dst, mode)
+    }
+  }
+  if (typeof fsSync.copyFileSync === 'function') {
+    const original = fsSync.copyFileSync
+    fsSync.copyFileSync = function userStorageAwareCopySync(src, dst, mode) {
+      if (isUserStoragePath(src) || isUserStoragePath(dst)) {
+        log(`fs.copyFileSync fallback (userland loop, userfile mount): ${src} -> ${dst}`)
+        return userlandCopySync(src, dst, mode)
+      }
+      return original.call(fsSync, src, dst, mode)
+    }
+  }
+}
+
+/**
  * Alias `node-addon-require-builtin` to the pure-JS shim when the native
  * addon cannot load (no openharmony-arm64 binding is published). A normal
  * desktop install keeps the real addon; the shim needs --expose-internals,
@@ -496,10 +760,41 @@ function installProfileTemplate() {
   }
 }
 
+/**
+ * Redirect require("sharp") to the pure-JS stub. The shipped bindings are
+ * darwin-arm64 (cannot dlopen on-device) and wasm32 (needs WebAssembly,
+ * absent under --jitless), so the real module always throws and image
+ * admission fails with an opaque "unable to persist the prompt image
+ * batch". The stub keeps metadata()/raw() probing alive for pass-through
+ * images and fails closed on re-encoding. DSH_SHARP_STUB=0 opts out.
+ */
+function installSharpStub() {
+  if (process.env.DSH_SHARP_STUB === '0') {
+    log('sharp-stub: disabled via DSH_SHARP_STUB=0')
+    return
+  }
+  const stubPath = path.join(__dirname, 'sharp-stub.cjs')
+  if (!fs.existsSync(stubPath)) {
+    log('sharp-stub: stub file missing; image admission will fail on-device')
+    return
+  }
+  const originalLoad = Module._load
+  Module._load = function (request, parent, isMain) {
+    if (request === 'sharp') return require(stubPath)
+    return originalLoad.apply(this, arguments)
+  }
+  log('sharp-stub: require("sharp") redirected to pure-JS stub (pass-through images only)')
+}
+
 function main() {
   rerouteConsole()
   installRequireBuiltinAlias()
+  installSharpStub()
   installLinkFallback()
+  installDirSyncFallback()
+  installUserStorageChmodFallback()
+  installUserStorageCopyFallback()
+  installFileHandleFallbacks()
   tightenKeyFile()
   const templateReady = installProfileTemplate()
   if (PROFILE === 'acp' && templateReady) {

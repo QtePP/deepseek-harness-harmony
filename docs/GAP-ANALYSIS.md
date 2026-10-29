@@ -130,15 +130,21 @@ return hits
 **worker_thread**，在 worker 内用 `node:vm` 求值程序——不在主线程跑：sync 死循环用
 `worker.terminate()`（V8 TerminateExecution）硬杀，比 vm timeout 可靠；worker_threads
 不可用时 `run_code` 优雅返回 `kind: "worker-exit"`，不崩主进程。接线在
-`dsh-bundle-ohos`：deps 声明 + patch 禁 stock `ptc-runtime`（`dsh-ptc-runtime-node`）、
-`tools` 置 `config.mode: ptc`。
+`dsh-bundle-ohos`：deps 声明 + patch 禁 stock `ptc-runtime`（`dsh-ptc-runtime-node`）。
+`tools` 行现为 `config.mode: native`（2026-10-29 起，此前短暂为 `mode: ptc`；native 是
+dsh-base 的默认——省略 mode 时的 schema 默认值）。
 
 实测契约（本地 E2E + 读源码所得，**勿凭直觉改**）：
 
 - **`mode` 枚举只有 `"native" | "ptc"`**（无 "sdk"；配 `sdk` 启动即
-  `ValidationError`）。`mode: ptc` 是**全坍缩**：`run_code` 成为模型唯一可直接调用的
-  工具（todo/create_goal 等也坍缩），其余工具全部进程序内 `tools.*` SDK（dsh-tools 自动
-  渲染 SDK section + PTC_ONLY_INSTRUCTION）。
+  `ValidationError`）。`mode: ptc` 是**全坍缩**：wire 上 `run_code` 成为模型唯一可直接
+  调用的工具（`wireSchemas` 过滤到只剩 run_code，todo/create_goal 等也坍缩），其余工具
+  全部进程序内 `tools.*` SDK（dsh-tools 自动渲染 SDK section + PTC_ONLY_INSTRUCTION）。
+  **`mode: native` 则相反：21 个工具全部直出，`run_code` 不在模型工具表**（dsh-tools
+  `view()` 只在 `mode !== "native"` 时 `visible.set(RUN_CODE_NAME)`）；boot-report 的
+  `tools(N)` 读 `ctx.tools.schemas()`（注册表视图而非 wire），ptc 计 22、native 计 21。
+  未来若要局部恢复 PTC，走 preset 级 `dsh-agent-tool-presentation` 行（`presentAs`），
+  不要改全局 mode。
 - **dsh-tools 的 binding 契约是 resolve=值 / reject=错误**（dsh-tools lib `return outcome.value`），
   **不是返回 settle 对象**。主侧把 rejected Error 的 message 作为失败回给 worker，
   worker 在 vm realm 内构造声明的错误类（如 `ToolCallError`）。
@@ -156,7 +162,7 @@ return hits
   worker-exit / invalid-output / output-limit / protocol / sandbox-unavailable。
 
 验证：单测 22/22（`node --test` 与 `--jitless` 双跑，载荷树内）→ dump-config
-（`ptc-runtime` disabled、`tools` `mode: ptc`、`ptc-runtime-vm` 与 `tool-fs-search-ohos`
+（`ptc-runtime` disabled、`tools` `config.mode: native`、`ptc-runtime-vm` 与 `tool-fs-search-ohos`
 插入）→ 冒烟 `deepseek-harness-acp` → **真实模型 E2E**：模型一次 `run_code` 调
 `tools.glob("**/*.txt")` 正确答 "3"，审批流（read-only 档越区读触发 `session/request_permission`
 → `allow-once`）走通。

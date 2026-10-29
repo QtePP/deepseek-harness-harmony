@@ -70,7 +70,7 @@ function prepareStaging() {
 
 function stageHost() {
   for (const file of ['bootstrap.cjs', 'fetch-shim.cjs', 'require-builtin-shim.cjs',
-                      'undici-esm.mjs', 'undici-hooks.mjs']) {
+                      'sharp-stub.cjs', 'undici-esm.mjs', 'undici-hooks.mjs']) {
     cpSync(join(HOST_DIR, file), join(STAGING, file))
   }
   // Profile patches travel with the payload; presence of ohos.patch.yml (not

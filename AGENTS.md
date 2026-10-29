@@ -34,8 +34,10 @@
 | **link-fallback** | 沙箱禁 hardlink（EACCES）⇒ `copyFile(COPYFILE_EXCL)` 降级，装配期注入 | `bootstrap.cjs` `installLinkFallback()` |
 | **840vp 断点** | ≥840vp：会话栏 + 对话双栏；<840vp：单栏，rail 收进 sheet | `entry/.../pages/Index.ets` |
 | **dsh-home** | 沙箱内运行时主目录：`bridge.log`、`bridge-status.json`、`sessions/`、`storages/` 等 | `NodeHost.ets` |
-| **ptc-runtime-vm / run_code** | in-process PTC 运行时（`@ohos/dsh-ptc-runtime-vm`，worker_threads + `node:vm`，随载荷分发）：`tools` 置 `mode: ptc` 后 `run_code` 是唯一直接可调工具，其余工具全坍缩进程序内 `tools.*` SDK；worker 不可用时优雅 `worker-exit` | `host/profile-ohos/.../@ohos/dsh-ptc-runtime-vm` |
+| **ptc-runtime-vm / run_code** | in-process PTC 运行时（`@ohos/dsh-ptc-runtime-vm`，worker_threads + `node:vm`，随载荷分发）：`tools` 行 `mode: native`（2026-10-29 起，此前短暂为 `mode: ptc`；dsh-base 默认即 native——`tools` 行省略 mode 时的 schema 默认值）。**native 下模型工具表 21 个直出工具（glob/grep/read/write/web_search/web_fetch/edit/skill/subagent/todo_write 等），`run_code` 不在其中**——dsh-tools 只在非 native 模式把 run_code 注入可见表（`dsh-tools/lib/index.js` view()：`mode !== "native"` 才 `visible.set(RUN_CODE_NAME)`）；`mode: ptc` 则反过来：wire 上**只有 run_code**（wireSchemas 过滤掉其余 schema），其余工具只能经程序内 `tools.*` SDK。boot-report 的 `tools(N)` 用 `ctx.tools.schemas()`（注册表视图），ptc 模式下计 22（全部 + run_code），native 下计 21。ptc-runtime-vm 仍挂载（提供 `ctx.ptcRuntime`），未来 preset 可经 `dsh-agent-tool-presentation` 行（`tool-presentation`，preset 级 `presentAs`）opt-in PTC；worker 不可用时优雅 `worker-exit` | `host/profile-ohos/.../@ohos/dsh-ptc-runtime-vm`、`.build/payload/node_modules/@deepseek-ai/dsh-tools/lib/index.js` |
 | **credentials-live / 密钥热更新** | `@ohos/dsh-credentials-live`（随载荷分发，ohos profile 专属）：目录级 fs.watch + 1.5s 轮询 `<dsh-home>/.api-key`，变化经 `credentials.set()/unset()` 热发布。dsh 启动期冻结 env 快照（`loadLayeredEnv` 拷 `process.env`），运行中改 env 永远无效——这是唯一热路径；Settings 保存密钥 ~2s 生效无需重启（ACP 路径；SDK profile 无此插件，重启生效） | `host/profile-ohos/.../@ohos/dsh-credentials-live` |
+| **time-context / 时间上下文** | `@deepseek-ai/dsh-time-context`（dsh 自带、随载荷分发）：把当前时间作为 durable 注入写进请求历史（默认 10 分钟一次），模型据此知道"今天"。**它不是工具**，桌面/SDK profile 由 `dsh-sdk-app` 挂载，`dsh-acp-app` 不含 → ohos bundle 自己 insert 一行；缺它时模型对相对日期的推理全是猜 | `@ohos/dsh-bundle-ohos/cordis.patch.yml` |
+| **boot-report / 能力自检** | `@ohos/dsh-boot-report`（ohos profile 专属）：启动 5s 后把已注册工具名与 `ctx.web.searchReady()/fetchReady()` 写进 `bridge.log`。手机没有终端，`web` 用 `ctx.get('web')` 而非 inject 读取，seam 整体缺失时也要报出来 | `host/profile-ohos/.../@ohos/dsh-boot-report` |
 
 ## 3. 架构口径（四层关系）
 
@@ -153,8 +155,10 @@ ACP 实测契约（勿凭直觉改）：
   项目分类（创建/切换真机验证，每项目独立 workspace）。
 - **in-process PTC 运行时已交付并真机闭环（2026-10-27，P1①）**：
   `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
-  `dsh-bundle-ohos` patch 禁 stock `ptc-runtime` 并把 `tools` 置 `mode: ptc`——run_code 成为
-  唯一直接可调工具，其余工具全坍缩进程序内 `tools.*` SDK（glob/grep/read/web 等可达）。
+  `dsh-bundle-ohos` patch 禁 stock `ptc-runtime`；`tools` 行现为 `mode: native`
+  （2026-10-29 起，此前短暂为 `mode: ptc`）——native 下 21 个工具直出（glob/grep/read/web
+  等），run_code 不在模型工具表（源码契约：仅非 native 注入）；ptc 模式则 wire 上只有
+  run_code，其余经程序内 `tools.*` SDK。
   真机（手机 2026-10-27）全绿：worker_threads 在 arm64/`--jitless` 可用；模型一个 run_code
   程序内 `tools.write`×3 + `tools.glob` 计数正确答 "4"；contain-probe 回归——程序内
   `grep` path=`..` 仍被收口拒绝（`grep path escapes the session workspace`）。本地：
@@ -173,7 +177,7 @@ ACP 实测契约（勿凭直觉改）：
   ArkTS 侧：`AppConfig.save` 以 temp+rename 原子写 `.api-key`（清 key 删文件）；`NodeHost`
   启动对空 key 删陈旧暂存（修跨重启清 key 失效 bug）；Settings 保存 toast 按 `host.isAcp()`
   分「即将生效」/「重启生效」。单测 8/8（载荷树内）+ 回归 fs-search 38/38、ptc 22/22
-  （含 `--jitless`）+ dump-config（`credentials-live-ohos` 挂载、五处 disabled、`mode: ptc`）
+  （含 `--jitless`）+ dump-config（`credentials-live-ohos` 挂载、五处 disabled、`mode: native`）
   + 冒烟。
 - **纯 JS 搜索插件已交付并真机闭环（2026-10-26，P0）**：自定义 `ohos` profile + bootstrap
   模板安装/acp→ohos 重映射；真机模型轮 `glob`/`grep` 真实命中（`danger-tablet-test.txt`），
@@ -207,6 +211,14 @@ ACP 实测契约（勿凭直觉改）：
   App 会在 2 分钟内自动回连抢回槽位——外部 fport 探针单轮（≤2min）不受影响，更长的
   外部实验须先 force-stop App，否则探针会被 App 的自动重连顶掉。
 - 真机序列号等本地信息只记在本地记忆（`.workbuddy-ai/memory/`，gitignored），**不写进公开仓库**。
+- **图片识别已修（2026-10-29）**：根因是**请求期投影**而非网络——dsh 把每张请求图投影到 DeepSeek 视觉网格
+  （14px patch、3:1 下采样、1024 token），源图超预算就要 sharp 重编码；设备上 sharp 只有 darwin-arm64 +
+  wasm32（jitless 无 WASM），`host/sharp-stub.cjs` 的编码阶梯 fail-closed，抛出的普通 Error 被
+  `dsh-llm-deepseek` 统一包成 `DeepSeek Messages transport failed`/`TRANSPORT`（重试 5 次全白跑，请求未发出）。
+  修法：桩的 `.jpeg()` 改为**原字节直通**并回报**源尺寸**（`toBuffer({resolveWithObject})` 契约），投影退化为
+  no-op、由服务端自己下采样，代价只是上传变大；WebP/PNG/TIFF/GIF 仍 fail-closed（其字节不能冒充 JPEG）。
+  本地验证：同一张 1320×2848 图 `readRequestImageFile` 从 `SharpStubError` 变为直通；ACP 端到端（无效 key）
+  已到达服务端并返回 401 鉴权错误，不再是 TRANSPORT。单测 17/17。
 
 签名口径（开源卫生）：
 
@@ -217,7 +229,8 @@ ACP 实测契约（勿凭直觉改）：
 - 手动命令行构建的合并/还原配方见 `docs/BUILD.md`。
 
 已知边界（诚实清单）：无 token 级流式；无二进制工具（git/rg/bash）；密钥若随 rawfile 分发
-仅适合自用/内测（优先级：设置页 > `secrets.json`）。
+仅适合自用/内测（优先级：设置页 > `secrets.json`）；**设备端不做图片降采样**——请求图按原尺寸上传
+（`sharp` 桩只能直通），由服务端投影到视觉网格，仅影响上传体积，不影响模型看到的内容。
 
 **密钥不得走 env**：`@fellow99/node-bridge` 在启动时把子进程环境 dump 进 `node.log`
 （`[node_bridge] env DEEPSEEK_API_KEY=…`）。因此 `NodeHost` 把 key 写成 `dsh-home/.api-key`（0600），
@@ -226,13 +239,18 @@ ACP 实测契约（勿凭直觉改）：
 
 ## 8. Agent 工作流约定
 
-1. **顺序**：改 `.ets` → ArkTS 静态检查（deveco 侧为 `arkts_check`，一次跑全部改动文件）→
+1. **顺序**：改 `.ets` → ArkTS 静态检查 `devecocli check arkts [files...]`（**需 CLI ≥ 1.3.10**，
+   一次传全部改动文件；旧版 1.3.0/1.3.4 没有这个子命令，只能退到 `devecocli check lint`）→
    `devecocli build` → `devecocli run --skip-build --device <serial>`。构建成功前任务不算完成。
 2. **载荷迭代**（仅当 `host/` 或依赖变化才需要）：`node scripts/assemble-payload.mjs`
    （`--skip-install` 可复用 staging）→ 再 build。
 3. **部署**：`bash scripts/deploy.sh [serial]`（查设备 → 登录 → 签名缺失时生成 → 构建 → 装+启动，
-   结束自动还原签名口径）。
-4. **验证**：`devecocli log`；应用内 设置 → 诊断；`uitest dumpLayout` + `hdc file recv` 做无头 UI 断言。
+   结束自动还原签名口径）。CLI 解析优先级：`DEVECO_CLI` 环境变量 > 仓库内 `.deveco-cli-path`
+   钉死的绝对路径（gitignored，本机专用）> PATH。**本机装有多份 devecocli，PATH 顺序会漂**，
+   需要时 `echo /path/to/devecocli > .deveco-cli-path` 钉死一份。
+4. **验证**：`devecocli log`（支持 `--crash` / `--level` / `--bundle-name` / `--tail` / `--follow`）；
+   应用内 设置 → 诊断；无头 UI 断言用 `devecocli ui layout|screenshot|click|swipe|text`
+   （封装好过手拼 `hdc shell uitest dumpLayout`，后者参数名跨版本变过）。
    本地三段验证（装机前先过一遍，全绿再部署）：
    - **单测**：必须在**载荷树内**跑——插件 `index.js` 依赖 `@deepseek-ai/schemastery` 等包，
      只有载荷根能解析，在仓库源目录直接跑会 `ERR_MODULE_NOT_FOUND`：
@@ -240,9 +258,10 @@ ACP 实测契约（勿凭直觉改）：
      `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-ptc-runtime-vm && node --test test/*.test.mjs`（22/22，
      加 `--jitless` 再跑一遍证明无 WASM 路径）；
      `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-credentials-live && node --test test/*.test.mjs`（8/8）。
-   - **配置层**：`DSH_HOME=.build/ohos-e2e node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos --patch .build/payload/patches/ohos.patch.yml --dump-config`
-     → `tool-bash`/`tool-pwsh`/`tool-jobs`/`tool-fs-search`/`ptc-runtime` 均为 `disabled: true`；
-     `tools` 行 `config.mode: ptc`；末尾有 `- id: tool-fs-search-ohos`、`- id: ptc-runtime-vm` 与 `- id: credentials-live-ohos`。
+    - **配置层**：`DSH_HOME=.build/ohos-e2e node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos --patch .build/payload/patches/ohos.patch.yml --dump-config`
+      → `tool-bash`/`tool-pwsh`/`tool-jobs`/`tool-fs-search`/`ptc-runtime` 均为 `disabled: true`；
+      `tools` 行 `config.mode: native`；末尾有 `- id: tool-fs-search-ohos`、`- id: ptc-runtime-vm`、
+      `- id: credentials-live-ohos`、`- id: time-context` 与 `- id: boot-report-ohos`。
      **`--profile ohos` 读的是 `$DSH_HOME/profiles/ohos`（不自动安装）**：模板变更后必须先
      `rm -rf .build/ohos-e2e/profiles/ohos && cp -R .build/payload/profile-ohos/profiles/ohos .build/ohos-e2e/profiles/ohos`
      再跑 dump，否则读到旧模板出现假阴性。
@@ -254,6 +273,8 @@ ACP 实测契约（勿凭直觉改）：
 5. **安全红线**：`secrets.json`、签名材料、设备序列号不进公开仓库；公开文档不出现密钥；
    发现泄漏立即提醒轮换。
 6. **口径同步**：改了协议/架构/流程，必须同一 commit 更新本文件与相关 docs/。
+7. **Token 预算**：**无上限**。仓库所有者正在对 agent 做极限测试——不要吝惜 Token，随意花费：
+   详细探索、多轮验证、完整取证永远优先于省 Token；宁可多花，不可省略。
 
 ## 9. 文档地图
 
@@ -264,3 +285,12 @@ ACP 实测契约（勿凭直觉改）：
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
 | `docs/PLUGIN-MIGRATION.md` | 客户端插件迁移分级（P0/P1/P2/不迁） |
 | `.workbuddy-ai/memory/` | 本地会话记忆（gitignored，不提交） |
+
+## 10. Skill 路由（UI 设计）
+
+本仓库的 **UI 设计 / 界面改动**任务，动笔前必须先用 `skill` 工具加载两个精选 skill（**都加载，不问**）：
+
+1. `swiftui-patterns` —— 当 **ArkUI 范式与状态管理参考**读（范式映射，不是让写 SwiftUI）；
+2. `make-interfaces-feel-better` —— 间距 / 字级 / 阴影 / 动效 / 命中区等**界面细节打磨**。
+
+其余任务（PDF、TDD、onboarding、ponytail 等）的路由查全局路由 skill `dsh-skill-router`。
