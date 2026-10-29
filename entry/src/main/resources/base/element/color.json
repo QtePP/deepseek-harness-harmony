@@ -55,6 +55,14 @@
     {
       "name": "code_background",
       "value": "#F1F2F5"
+    },
+    {
+      "name": "status_success",
+      "value": "#27AE60"
+    },
+    {
+      "name": "status_danger",
+      "value": "#C0392B"
     }
   ]
 }

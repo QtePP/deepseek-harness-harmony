@@ -1,15 +1,18 @@
 import { webview } from '@kit.ArkWeb'
 import { fileIo as fs } from '@kit.CoreFileKit'
+import { MdText } from './Markdown'
 
 /** How a referenced file renders. */
 enum PreviewKind {
   WEB = 'web',
   IMAGE = 'image',
+  MARKDOWN = 'markdown',
   TEXT = 'text'
 }
 
 const WEB_EXTS: string[] = ['html', 'htm', 'svg']
 const IMAGE_EXTS: string[] = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
+const MD_EXTS: string[] = ['md', 'markdown']
 const MAX_TEXT_BYTES: number = 1048576
 
 function extOf(path: string): string {
@@ -33,6 +36,11 @@ function kindOf(path: string): PreviewKind {
       return PreviewKind.IMAGE
     }
   }
+  for (const item of MD_EXTS) {
+    if (item === ext) {
+      return PreviewKind.MARKDOWN
+    }
+  }
   return PreviewKind.TEXT
 }
 
@@ -40,9 +48,10 @@ function kindOf(path: string): PreviewKind {
  * Full-screen preview for files dsh creates or mentions in chat.
  *
  * HTML/SVG render in an embedded Web component (file:// from the app
- * sandbox), images in an Image, everything else as capped monospace text.
- * Mounted per open through bindContentCover; @Watch re-opens it if the
- * cover component is reused for a different file.
+ * sandbox), images in an Image, Markdown through the chat renderer, and
+ * everything else as capped monospace text. Mounted per open through
+ * bindContentCover; @Watch re-opens it if the cover component is reused
+ * for a different file.
  */
 @Component
 export struct FileViewer {
@@ -73,7 +82,7 @@ export struct FileViewer {
         return
       }
       this.kind = kindOf(this.filePath)
-      if (this.kind === PreviewKind.TEXT) {
+      if (this.kind === PreviewKind.TEXT || this.kind === PreviewKind.MARKDOWN) {
         const size = fs.statSync(this.filePath).size
         this.truncated = size > MAX_TEXT_BYTES
         this.text = fs.readTextSync(this.filePath, { length: MAX_TEXT_BYTES })
@@ -140,6 +149,25 @@ export struct FileViewer {
         }
         .layoutWeight(1)
         .width('100%')
+      } else if (this.kind === PreviewKind.MARKDOWN) {
+        Scroll() {
+          Column({ space: 6 }) {
+            if (this.truncated) {
+              Text('文件超过 1MB，仅显示开头部分。')
+                .fontSize(11)
+                .fontColor($r('app.color.text_tertiary'))
+            }
+            MdText({ raw: this.text })
+              .width('100%')
+          }
+          .alignItems(HorizontalAlign.Start)
+          .constraintSize({ minHeight: '100%' })
+          .width('100%')
+          .padding(12)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Auto)
       } else {
         Scroll() {
           Column({ space: 6 }) {

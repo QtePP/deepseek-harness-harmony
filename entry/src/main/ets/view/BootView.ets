@@ -1,3 +1,4 @@
+import { curves } from '@kit.ArkUI'
 import { BootPhase } from '../host/NodeHost'
 
 /** Splash / failure surface shown until the runtime answers. */
@@ -6,8 +7,39 @@ export struct BootView {
   @Prop phase: BootPhase = BootPhase.IDLE
   @Prop detail: string = ''
   @Prop diagnostics: string = ''
+  /** Breathing opacity of the "Powered by" tagline below the name. */
+  @State tagOpacity: number = 1
+  /** Staged entrance: the hero rises in — logo springs, name and tagline follow. */
+  @State logoScale: number = 0.72
+  @State logoOpacity: number = 0
+  @State titleOpacity: number = 0
+  @State titleRise: number = 16
+  @State tagIntro: number = 0
   onRetry: () => void = () => {}
   onShowDiagnostics: () => void = () => {}
+
+  aboutToAppear(): void {
+    this.getUIContext().animateTo({ curve: curves.springMotion(0.42, 0.82) }, () => {
+      this.logoScale = 1
+      this.logoOpacity = 1
+    })
+    this.getUIContext().animateTo({ duration: 420, curve: Curve.EaseOut, delay: 140 }, () => {
+      this.titleOpacity = 1
+      this.titleRise = 0
+    })
+    this.getUIContext().animateTo({ duration: 420, curve: Curve.EaseOut, delay: 280 }, () => {
+      this.tagIntro = 1
+    })
+    this.getUIContext().animateTo({
+      duration: 1600,
+      curve: Curve.EaseInOut,
+      iterations: -1,
+      playMode: PlayMode.Alternate,
+      delay: 1000
+    }, () => {
+      this.tagOpacity = 0.35
+    })
+  }
 
   private isFailure(): boolean {
     return this.phase === BootPhase.FAILED
@@ -32,14 +64,23 @@ export struct BootView {
 
   build() {
     Column({ space: 16 }) {
-      Text('dsh')
-        .fontSize(44)
-        .fontWeight(FontWeight.Bold)
-        .fontColor($r('app.color.brand'))
+      Image($r('app.media.app_logo'))
+        .width(96)
+        .height(96)
+        .scale({ x: this.logoScale, y: this.logoScale })
+        .opacity(this.logoOpacity)
 
-      Text('DeepSeek Harness · HarmonyOS')
-        .fontSize(14)
+      Text('TA Harness')
+        .fontSize(34)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .opacity(this.titleOpacity)
+        .translate({ y: this.titleRise })
+
+      Text('Powered by DeepSeek Harness')
+        .fontSize(13)
         .fontColor($r('app.color.text_secondary'))
+        .opacity(this.tagIntro * this.tagOpacity)
 
       if (this.isFailure()) {
         Text(this.label())

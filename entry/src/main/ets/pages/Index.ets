@@ -1,21 +1,76 @@
 import { common } from '@kit.AbilityKit'
+import { util } from '@kit.ArkTS'
+import { fileIo as fs } from '@kit.CoreFileKit'
+import { image } from '@kit.ImageKit'
+import { photoAccessHelper } from '@kit.MediaLibraryKit'
+import { hilog } from '@kit.PerformanceAnalysisKit'
+import { BusinessError } from '@kit.BasicServicesKit'
 import { BootPhase, NodeHost } from '../host/NodeHost'
 import { AppConfig } from '../common/AppConfig'
 import { PluginConfig } from '../common/PluginConfig'
 import { PluginCatalog, PluginRow } from '../model/PluginCatalog'
-import { ChatMessage, Role, SessionStore, SessionSummary, newSessionId, titleOf } from '../model/ChatModel'
+import { ChatMessage, Role, SessionStore, SessionSummary, ToolTrace, newSessionId, titleOf } from '../model/ChatModel'
 import { ProjectStore, ProjectSummary } from '../model/ProjectModel'
 import { renderBlocks, RenderedBlock } from '../model/DshClient'
+import { DirGrant } from '../host/DirGrant'
+import { ShareInbox } from '../model/ShareInbox'
 import { EventLike, SessionEventPayload, SessionStatusPayload } from '../model/Protocol'
 import {
-  AcpConfigOption, AcpModelChoice, AcpPermissionRequest, AcpSessionNewResult, AcpSetConfigResult,
-  AcpUpdatePayload, findConfigOption, flattenChoices
+  AcpConfigOption, AcpContentBlock, AcpModelChoice, AcpPermissionRequest, AcpSessionNewResult,
+  AcpSetConfigResult, AcpUpdatePayload, findConfigOption, flattenChoices, textOfUpdateContent,
+  toolTextOfUpdateContent
 } from '../model/AcpProtocol'
 import { BootView } from '../view/BootView'
 import { ChatView, FileRef } from '../view/ChatView'
 import { FileViewer } from '../view/FileViewer'
+import { FilesPanel } from '../view/FilesPanel'
 import { SessionRail } from '../view/SessionRail'
 import { SettingsSheet } from '../view/SettingsSheet'
+
+/** dsh pass-through admission budget: encoded bytes and decoded pixels per image. */
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024
+const MAX_PASS_THROUGH_PIXELS = 2048 * 2048
+/** Display caps for tool arguments and results carried on one tool row. */
+const MAX_TOOL_INPUT_CHARS = 1200
+const MAX_TOOL_OUTPUT_CHARS = 4000
+
+/**
+ * Argument fields worth surfacing on a collapsed tool row, in reading order.
+ * `run_code` carries its program in `code`; the fs tools use `path`; search
+ * uses `pattern` / `query`. Falling back to the whole JSON keeps exotic tools
+ * legible without a per-tool renderer.
+ */
+const DIGEST_KEYS: string[] = [
+  'command', 'code', 'query', 'pattern', 'path', 'file_path', 'filePath', 'url', 'prompt', 'language'
+]
+
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.substring(0, max)}…` : text
+}
+
+/** One-line-ish digest of a tool call's arguments for the collapsed row. */
+function digestToolInput(raw: Record<string, Object> | undefined): string {
+  if (raw === undefined) {
+    return ''
+  }
+  for (const key of DIGEST_KEYS) {
+    const value = raw[key]
+    if (value === undefined) {
+      continue
+    }
+    if (typeof value === 'string') {
+      const text = value as string
+      if (text.length > 0) {
+        return clipText(text, MAX_TOOL_INPUT_CHARS)
+      }
+    }
+  }
+  try {
+    return clipText(JSON.stringify(raw), MAX_TOOL_INPUT_CHARS)
+  } catch (error) {
+    return ''
+  }
+}
 
 /**
  * App shell.
@@ -40,6 +95,8 @@ struct Index {
   @State showViewer: boolean = false
   @State viewerPath: string = ''
   @State viewerName: string = ''
+  @State showFiles: boolean = false
+  @State filesTick: number = 0
   @State diagnostics: string = ''
   @State widthVp: number = 360
   @State title: string = '新会话'
@@ -52,6 +109,9 @@ struct Index {
   @State modelChoices: AcpModelChoice[] = []
   @State approvalVisible: boolean = false
   @State approvalText: string = ''
+  /** Share prefill landing in the composer (absorbed once by ChatView). */
+  @State shareText: string = ''
+  @State attachPaths: string[] = []
 
   private host: NodeHost = NodeHost.get()
   private store: SessionStore = new SessionStore()
@@ -59,6 +119,10 @@ struct Index {
   private context: common.UIAbilityContext | null = null
   /** Session ids the runtime already owns in this process (prompted/resumed). */
   private openedSessions: Set<string> = new Set<string>()
+  /** Tool trace entries of the live turn, keyed by toolCallId so updates land. */
+  private toolRows: Map<string, ToolTrace> = new Map<string, ToolTrace>()
+  /** Assistant row hosting the live turn's expandable tool trace. */
+  private traceRow: ChatMessage | null = null
   /** In-flight session opens, deduped per id. */
   private openingSessions: Map<string, Promise<void>> = new Map<string, Promise<void>>()
   /** Server approval waiting for the user; null once answered. */
@@ -75,7 +139,40 @@ struct Index {
   private redispatchDisconnect: string = ''
 
   aboutToAppear(): void {
+    ShareInbox.setListener((text: string, imagePath: string, imageName: string) => {
+      this.landShare(text, imagePath, imageName)
+    })
     void this.init()
+  }
+
+  aboutToDisappear(): void {
+    ShareInbox.clearListener()
+  }
+
+  /** A share landed: text prefills the draft, an image rides along as attachment. */
+  private landShare(text: string, imagePath: string, imageName: string): void {
+    if (text.length > 0) {
+      this.shareText = text
+    }
+    if (imagePath.length > 0) {
+      void this.attachSharedImage(imagePath, imageName)
+    }
+  }
+
+  /**
+   * Stage a shared image through the same JPEG transcode the picker uses.
+   * Shared files arrive in whatever format the sender produced (PNG, HEIC,
+   * oversized camera JPEG); only a clean JFIF inside the attachment budget
+   * survives admission, and everything else would fail at request time.
+   */
+  private async attachSharedImage(path: string, name: string): Promise<void> {
+    const staged = await this.transcodeToJpeg(path)
+    if (staged === null) {
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+        `无法处理分享的图片${name.length > 0 ? `「${name}」` : ''}，请改用相册选择。`, '错误'))
+      return
+    }
+    this.attachPaths = [staged]
   }
 
   private async init(): Promise<void> {
@@ -86,6 +183,14 @@ struct Index {
     this.pluginRows = PluginCatalog.rows(PluginConfig.disabled)
     await this.projectStore.init(context)
     this.projects = await this.projectStore.list()
+    // Re-activate persisted directory grants so bound project workspaces are
+    // reachable at their real paths; failure is non-fatal (the affected
+    // project surfaces a clear error when its session opens).
+    try {
+      await DirGrant.activate(await this.projectStore.boundUris())
+    } catch (error) {
+      // Grants may be missing after a reinstall; binding again fixes it.
+    }
     this.currentProjectId = await this.projectStore.loadLastSelected()
     await this.store.init(context)
     this.sessions = await this.store.list(this.currentProjectId)
@@ -159,20 +264,24 @@ struct Index {
     if (type === 'assistant/message') {
       const blocks: RenderedBlock[] = renderBlocks(event)
       let text = ''
+      let reasoning = ''
       const notes: string[] = []
       for (const block of blocks) {
         if (block.kind === 'text') {
           text += block.text
         } else if (block.kind === 'reasoning') {
-          notes.push('思考')
+          // Thinking is content, not a badge: keep it for the collapsible block.
+          reasoning += block.text
         } else {
           notes.push(block.text)
         }
       }
-      if (text.trim().length === 0) {
+      if (text.trim().length === 0 && reasoning.trim().length === 0) {
         return
       }
-      this.append(new ChatMessage(newSessionId(), Role.ASSISTANT, text, notes.join(' · ')))
+      const message = new ChatMessage(newSessionId(), Role.ASSISTANT, text, notes.join(' · '))
+      message.reasoning = reasoning
+      this.append(message)
       void this.persist()
       return
     }
@@ -180,15 +289,33 @@ struct Index {
     if (type === 'tool/call') {
       const name = event.data?.name === undefined ? '工具' : event.data?.name
       const args = event.data?.arguments === undefined ? '' : event.data?.arguments
-      const preview = args.length > 160 ? args.substring(0, 160) + '…' : args
-      this.append(new ChatMessage(newSessionId(), Role.TOOL, `${name}\n${preview}`, '工具调用'))
+      if (this.traceRow === null) {
+        // The trace rides the assistant row this turn's thinking lives on;
+        // a call before any message gets a fresh host row.
+        let host: ChatMessage | null = null
+        for (let index = this.messages.length - 1; index >= 0; index--) {
+          if (this.messages[index].role === Role.ASSISTANT) {
+            host = this.messages[index]
+            break
+          }
+        }
+        if (host === null) {
+          host = new ChatMessage(newSessionId(), Role.ASSISTANT, '', '')
+          this.append(host)
+        }
+        this.traceRow = host
+      }
+      const entry = new ToolTrace(name)
+      entry.input = clipText(args, MAX_TOOL_INPUT_CHARS)
+      entry.reasonOffset = this.traceRow.reasoning.length
+      this.traceRow.trace = this.traceRow.trace.concat([entry])
       return
     }
 
     if (type === 'tool/result') {
       const kind = event.data?.reason?.kind
       const reason = kind === undefined ? '完成' : kind
-      this.append(new ChatMessage(newSessionId(), Role.TOOL, reason, '工具结果'))
+      this.settleLatestTrace(reason)
       return
     }
 
@@ -211,6 +338,24 @@ struct Index {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, text, note))
       }
       void this.persist()
+      return
+    }
+  }
+
+  /** Settle the newest still-running trace entry (SDK profile carries no call id). */
+  private settleLatestTrace(reason: string): void {
+    if (this.traceRow === null) {
+      return
+    }
+    const entries = this.traceRow.trace
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const entry = entries[index]
+      if (entry.status === 'completed' || entry.status === 'failed') {
+        continue
+      }
+      entry.status = reason === 'error' ? 'failed' : 'completed'
+      entry.doneAt = Date.now()
+      entry.output = entry.output.length > 0 ? entry.output : reason
       return
     }
   }
@@ -258,8 +403,10 @@ struct Index {
         }
       }
       if (projectId !== ProjectStore.DEFAULT_ID && this.context !== null) {
-        ProjectStore.ensureWorkspace(this.context, projectId)
-        const dir = ProjectStore.workspaceDir(this.context, projectId)
+        if (this.boundOf(projectId) === null) {
+          ProjectStore.ensureWorkspace(this.context, projectId)
+        }
+        const dir = this.workspaceOf(projectId)
         try {
           await this.host.client.setWorkingDirectory(id, dir)
           this.openedSessions.add(id)
@@ -273,9 +420,15 @@ struct Index {
     }
   }
 
-  private async send(text: string): Promise<void> {
+  private async send(text: string, attachPaths: string[]): Promise<void> {
     if (this.host.isAcp()) {
-      await this.sendAcp(text)
+      await this.sendAcp(text, attachPaths)
+      return
+    }
+    if (attachPaths.length > 0) {
+      this.append(new ChatMessage(newSessionId(), Role.SYSTEM, 'SDK 通道暂不支持图片输入，本次仅发送文字。', '提示'))
+    }
+    if (text.length === 0) {
       return
     }
     if (this.messages.length === 0) {
@@ -285,6 +438,7 @@ struct Index {
     void this.persist()
     await this.ensureSessionOpen(this.currentId, this.currentProjectId)
     this.running = true
+    this.traceRow = null
     try {
       await this.host.client.prompt(this.currentId, text)
       this.openedSessions.add(this.currentId)
@@ -318,8 +472,9 @@ struct Index {
     if (this.context === null) {
       return ''
     }
-    const cwd = ProjectStore.workspaceDir(this.context, this.currentProjectId)
-    if (this.currentProjectId !== ProjectStore.DEFAULT_ID) {
+    const cwd = this.workspaceOf(this.currentProjectId)
+    if (this.currentProjectId !== ProjectStore.DEFAULT_ID &&
+      this.boundOf(this.currentProjectId) === null && this.context !== null) {
       ProjectStore.ensureWorkspace(this.context, this.currentProjectId)
     }
     try {
@@ -347,7 +502,7 @@ struct Index {
     if (this.context === null || this.openedSessions.has(this.currentId)) {
       return
     }
-    const cwd = ProjectStore.workspaceDir(this.context, this.currentProjectId)
+    const cwd = this.workspaceOf(this.currentProjectId)
     try {
       const restored = await this.host.acp.sessionResume(this.currentId, cwd)
       this.openedSessions.add(this.currentId)
@@ -370,11 +525,41 @@ struct Index {
   }
 
   /** One ACP turn: stream chunks into a live bubble, settle on stopReason. */
-  private async sendAcp(text: string): Promise<void> {
-    if (this.messages.length === 0) {
-      this.title = titleOf(text)
+  private async sendAcp(text: string, attachPaths: string[]): Promise<void> {
+    const blocks: AcpContentBlock[] = []
+    if (attachPaths.length > 0) {
+      if (!this.host.acp.getImagePrompts()) {
+        this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+          '当前连接未开放图片输入：需默认模型为 DeepSeek-V4.1-Flash，修改后重启应用生效。', '提示'))
+        return
+      }
+      for (const path of attachPaths) {
+        const imageBlock = this.readImageBlock(path)
+        if (imageBlock === null) {
+          this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+            '附件图片不可发送：仅支持 PNG/JPEG/WebP/GIF，且不超过 15MB。', '错误'))
+          return
+        }
+        blocks.push(imageBlock)
+      }
     }
-    this.append(new ChatMessage(newSessionId(), Role.USER, text, ''))
+    if (text.length > 0) {
+      const textBlock: AcpContentBlock = { type: 'text', text: text }
+      blocks.push(textBlock)
+    }
+    if (blocks.length === 0) {
+      return
+    }
+    if (this.messages.length === 0) {
+      this.title = titleOf(text.length > 0 ? text : '图片请求')
+    }
+    const user = new ChatMessage(newSessionId(), Role.USER, text, attachPaths.length > 0 ? '附件图片' : '')
+    for (const path of attachPaths) {
+      user.images.push(path)
+    }
+    user.image = attachPaths.length > 0 ? attachPaths[0] : ''
+    this.append(user)
+    this.attachPaths = []
     void this.persist()
     if (this.reconnecting) {
       this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
@@ -384,9 +569,11 @@ struct Index {
     await this.ensureAcpSession()
     this.running = true
     this.liveAssistant = null
+    this.traceRow = null
+    this.toolRows.clear()
     this.turnInFlight = true
     try {
-      const result = await this.host.acp.sessionPrompt(this.currentId, text)
+      const result = await this.host.acp.sessionPromptBlocks(this.currentId, blocks)
       this.turnInFlight = false
       this.running = false
       this.liveAssistant = null
@@ -401,10 +588,19 @@ struct Index {
       this.turnInFlight = false
       this.running = false
       this.liveAssistant = null
-      // A transport drop is explained by the reconnect flow instead; every
-      // other failure stays a plain send error.
+      // A transport drop is explained by the reconnect flow instead; image
+      // rejections get targeted advice; everything else stays a send error.
       const message = (error as Error).message
-      if (!this.isTransportDrop(message)) {
+      if (this.isTransportDrop(message)) {
+        return
+      }
+      if (message.includes('does not declare image input')) {
+        this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+          '当前会话模型不支持图片输入：点右上角「模型」切换到 DeepSeek-V4.1-Flash 后重试。', '提示'))
+      } else if (message.includes('inline image prompts were not advertised')) {
+        this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+          '当前连接未开放图片输入：需默认模型为 DeepSeek-V4.1-Flash 并重启应用。', '提示'))
+      } else {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `发送失败：${message}`, '错误'))
       }
     }
@@ -414,6 +610,191 @@ struct Index {
   private isTransportDrop(message: string): boolean {
     return message.includes('bridge closed') || message.includes('bridge error') ||
       message.includes('bridge not connected') || message.includes('send failed')
+  }
+
+  /**
+   * Read one sandbox image into an inline ACP image block. The server only
+   * accepts canonical base64 with the four raster MIME types; the 15MB cap
+   * keeps the base64 frame well inside practical socket sizes.
+   */
+  private readImageBlock(path: string): AcpContentBlock | null {
+    const mime = this.imageMimeOf(path)
+    if (mime.length === 0) {
+      return null
+    }
+    try {
+      const stat = fs.statSync(path)
+      if (stat.size <= 0 || stat.size > 15 * 1024 * 1024) {
+        return null
+      }
+      const file = fs.openSync(path, fs.OpenMode.READ_ONLY)
+      const buffer = new ArrayBuffer(stat.size)
+      fs.readSync(file.fd, buffer)
+      fs.closeSync(file)
+      const base64 = new util.Base64Helper().encodeToStringSync(new Uint8Array(buffer))
+      const block: AcpContentBlock = { type: 'image', data: base64, mimeType: mime }
+      return block
+    } catch (error) {
+      return null
+    }
+  }
+
+  /** Wire MIME for the four accepted raster formats; '' means unsupported. */
+  private imageMimeOf(path: string): string {
+    const dot = path.lastIndexOf('.')
+    const ext = dot >= 0 ? path.substring(dot + 1).toLowerCase() : ''
+    if (ext === 'png') {
+      return 'image/png'
+    }
+    if (ext === 'jpg' || ext === 'jpeg') {
+      return 'image/jpeg'
+    }
+    if (ext === 'webp') {
+      return 'image/webp'
+    }
+    if (ext === 'gif') {
+      return 'image/gif'
+    }
+    return ''
+  }
+
+  /**
+   * System photo picker (no permission needed): pick one image, transcode it
+   * to JPEG so every source format (incl. HEIC/BMP) passes `readImageBlock`,
+   * and stage it in the sandbox as the pending attachment.
+   */
+  private async pickImage(): Promise<void> {
+    if (this.context === null) {
+      return
+    }
+    try {
+      const options = new photoAccessHelper.PhotoSelectOptions()
+      options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE
+      options.maxSelectNumber = 9
+      const picker = new photoAccessHelper.PhotoViewPicker()
+      const selected = await picker.select(options)
+      hilog.info(0x0000, 'PickImage', 'select returned %{public}d uris', selected.photoUris.length)
+      if (selected.photoUris.length === 0) {
+        return
+      }
+      const staged: string[] = []
+      for (const uri of selected.photoUris) {
+        const path = await this.transcodeToJpeg(uri)
+        if (path !== null) {
+          staged.push(path)
+        }
+      }
+      if (staged.length === 0) {
+        this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+          '所选图片无法读取，请换一张重试。', '错误'))
+        return
+      }
+      this.attachPaths = staged
+    } catch (error) {
+      const err = error as BusinessError
+      hilog.warn(0x0000, 'PickImage', 'pick failed: %{public}d %{public}s',
+        err.code === undefined ? 0 : err.code, err.message === undefined ? '' : err.message)
+      if (err.message !== undefined && err.message.length > 0) {
+        this.append(new ChatMessage(newSessionId(), Role.SYSTEM,
+          `图片选择失败：${err.message}`, '错误'))
+      }
+    }
+  }
+
+  /**
+   * Decode any picker URI (via fd; media URIs are not accepted directly) and re-encode as JPEG.
+   * The output is kept inside dsh's pass-through normalization budget — single-frame,
+   * metadata-free 8-bit sRGB at ≤ 2048² pixels and ≤ 4MB bytes — so the server never needs
+   * its (unavailable on-device) sharp re-encoding path.
+   */
+  private async transcodeToJpeg(uri: string): Promise<string | null> {
+    if (this.context === null) {
+      return null
+    }
+    const src = fs.openSync(uri, fs.OpenMode.READ_ONLY)
+    try {
+      const source = image.createImageSource(src.fd)
+      try {
+        const pixel = await source.createPixelMap()
+        const downscale = await this.fitPixelBudget(pixel)
+        const packer = image.createImagePacker()
+        try {
+          for (const quality of [85, 75, 65, 55, 45]) {
+            const option: image.PackingOption = { format: 'image/jpeg', quality: quality }
+            const data = await packer.packing(pixel, option)
+            if (data.byteLength <= MAX_ATTACHMENT_BYTES || quality === 45) {
+              const path = this.writePickedJpeg(data)
+              hilog.info(0x0000, 'PickImage',
+                'packed %{public}d bytes at q%{public}d (downscaled: %{public}s)',
+                data.byteLength, quality, `${downscale}`)
+              return path
+            }
+          }
+          return null
+        } finally {
+          packer.release()
+          pixel.release()
+        }
+      } finally {
+        source.release()
+      }
+    } catch (error) {
+      hilog.warn(0x0000, 'PickImage', 'transcode failed: %{public}s', `${error}`)
+      return null
+    } finally {
+      fs.closeSync(src)
+    }
+  }
+
+  /**
+   * Scale a decoded pixel map down to dsh's pass-through pixel budget (2048²).
+   * PixelMap.applyScale takes width/height ratios (not target sizes); passing
+   * target dimensions is silently ignored, so ratio semantics must be kept.
+   */
+  private async fitPixelBudget(pixel: image.PixelMap): Promise<boolean> {
+    let info = await pixel.getImageInfo()
+    let pixels = info.size.width * info.size.height
+    if (pixels <= MAX_PASS_THROUGH_PIXELS) {
+      return false
+    }
+    const ratio = Math.sqrt(MAX_PASS_THROUGH_PIXELS / pixels) * 0.98
+    await pixel.applyScale(ratio, ratio, image.AntiAliasingLevel.MEDIUM)
+    info = await pixel.getImageInfo()
+    pixels = info.size.width * info.size.height
+    if (pixels > MAX_PASS_THROUGH_PIXELS) {
+      const retry = Math.sqrt(MAX_PASS_THROUGH_PIXELS / pixels) * 0.98
+      await pixel.applyScale(retry, retry, image.AntiAliasingLevel.MEDIUM)
+    }
+    return true
+  }
+
+  /** Write transcoded JPEG bytes into filesDir/picked with a random name. */
+  private writePickedJpeg(data: ArrayBuffer): string | null {
+    if (this.context === null) {
+      return null
+    }
+    const dir = `${this.context.filesDir}/picked`
+    if (!fs.accessSync(dir)) {
+      fs.mkdirSync(dir)
+    }
+    const destPath = `${dir}/${util.generateRandomUUID(true)}.jpg`
+    const file = fs.openSync(destPath, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC)
+    try {
+      fs.writeSync(file.fd, data)
+    } finally {
+      fs.closeSync(file)
+    }
+    return destPath
+  }
+
+  /** The assistant row streaming chunks land in; created on the first chunk. */
+  private liveRow(): ChatMessage {
+    if (this.liveAssistant === null) {
+      const fresh = new ChatMessage(newSessionId(), Role.ASSISTANT, '', '')
+      this.liveAssistant = fresh
+      this.append(fresh)
+    }
+    return this.liveAssistant
   }
 
   /** Render one session/update notification into the transcript. */
@@ -428,42 +809,88 @@ struct Index {
     const kind = update.sessionUpdate === undefined ?
       (update.type === undefined ? '' : update.type) : update.sessionUpdate
     if (kind === 'agent_message_chunk') {
-      const text = update.content === undefined ? '' : (update.content.text === undefined ? '' : update.content.text)
+      const text = textOfUpdateContent(update.content)
       if (text.length === 0) {
         return
       }
-      if (this.liveAssistant === null) {
-        const fresh = new ChatMessage(newSessionId(), Role.ASSISTANT, text, '')
-        this.liveAssistant = fresh
-        this.append(fresh)
-      } else {
-        this.liveAssistant.text += text
-      }
+      const row = this.liveRow()
+      row.text += text
       return
     }
     if (kind === 'agent_thought_chunk') {
-      if (this.liveAssistant !== null && this.liveAssistant.note.length === 0) {
-        this.liveAssistant.note = '思考中…'
+      // Thinking arrives as its own stream before the answer; keep the text and
+      // render it as a collapsible block instead of a transient "思考中…" note.
+      // After a tool call froze the live row, thinking keeps flowing into the
+      // trace host so the merged timeline stays chronological.
+      const thought = textOfUpdateContent(update.content)
+      if (thought.length === 0) {
+        return
       }
+      const row = this.traceRow !== null && this.liveAssistant === null ?
+        this.traceRow : this.liveRow()
+      row.reasoning += thought
       return
     }
     if (kind === 'tool_call') {
-      const title = update.title === undefined ?
+      const callId = update.toolCallId === undefined ? '' : update.toolCallId
+      const name = update.title === undefined ?
         (update.toolKind === undefined ? '工具调用' : update.toolKind) : update.title
-      this.append(new ChatMessage(newSessionId(), Role.TOOL, title, '工具调用'))
+      // One trace per turn, hosted on the row that holds this turn's thinking:
+      // each entry records the thinking length at attach so the renderer can
+      // interleave calls with the thought stream in order.
+      if (this.traceRow === null) {
+        this.traceRow = this.liveRow()
+      }
+      const entry = new ToolTrace(name)
+      entry.callId = callId
+      entry.input = digestToolInput(update.rawInput)
+      entry.reasonOffset = this.traceRow.reasoning.length
+      entry.status = update.status === undefined ? 'in_progress' : update.status
+      if (entry.status === 'completed' || entry.status === 'failed') {
+        entry.doneAt = Date.now()
+      }
+      if (callId.length > 0) {
+        this.toolRows.set(callId, entry)
+      }
+      // Freeze the live row so the answer opens a fresh bubble below the trace.
+      this.liveAssistant = null
+      this.traceRow.trace = this.traceRow.trace.concat([entry])
       return
     }
     if (kind === 'tool_call_update') {
-      if (update.status === 'failed') {
-        this.append(new ChatMessage(newSessionId(), Role.TOOL, '工具执行失败', '工具结果'))
+      const callId = update.toolCallId === undefined ? '' : update.toolCallId
+      const entry = callId.length > 0 ? this.toolRows.get(callId) : undefined
+      if (entry === undefined) {
+        return
+      }
+      if (update.status !== undefined && update.status.length > 0) {
+        if ((update.status === 'completed' || update.status === 'failed') &&
+          entry.status !== 'completed' && entry.status !== 'failed') {
+          entry.doneAt = Date.now()
+        }
+        entry.status = update.status
+      }
+      const output = toolTextOfUpdateContent(update.content)
+      if (output.length > 0) {
+        entry.output = clipText(output, MAX_TOOL_OUTPUT_CHARS)
       }
       return
     }
     if (kind === 'usage_update') {
+      const used = update.used === undefined ? 0 : update.used
+      const size = update.size === undefined ? 0 : update.size
+      const label = `上下文 ${used}/${size}`
       if (this.liveAssistant !== null) {
-        const used = update.used === undefined ? 0 : update.used
-        const size = update.size === undefined ? 0 : update.size
-        this.liveAssistant.note = `上下文 ${used}/${size}`
+        this.liveAssistant.note = label
+      } else {
+        // The live row was frozen by a tool call; the usage note belongs to
+        // the newest assistant row of this turn regardless.
+        for (let index = this.messages.length - 1; index >= 0; index--) {
+          if (this.messages[index].role === Role.ASSISTANT) {
+            this.messages[index].note = label
+            break
+          }
+        }
       }
     }
   }
@@ -589,7 +1016,7 @@ struct Index {
       // the resume below still applies.
     }
     try {
-      const cwd = ProjectStore.workspaceDir(this.context, this.currentProjectId)
+      const cwd = this.workspaceOf(this.currentProjectId)
       const restored = await this.host.acp.sessionResume(this.currentId, cwd)
       this.openedSessions.add(this.currentId)
       this.applyAcpConfig(restored)
@@ -679,6 +1106,8 @@ struct Index {
       this.title = '新会话'
       this.running = false
       this.liveAssistant = null
+      this.traceRow = null
+      this.toolRows.clear()
       this.showSessions = false
       return
     }
@@ -706,20 +1135,169 @@ struct Index {
     }
     this.title = title
     this.running = false
+    this.liveAssistant = null
+    this.traceRow = null
+    this.toolRows.clear()
   }
 
   /**
-   * Open a workspace file referenced from chat. Absolute paths (as emitted
-   * by tool calls) pass through; relative paths resolve against the current
-   * project's workspace, which is also the session's runtime cwd.
+   * Delete one conversation end to end: close it server-side when this
+   * process owns it, drop the cached index row and message blob, and remove
+   * the durable server log under dsh-home. Workspace files survive — they
+   * belong to the project, not the conversation.
    */
-  private openFile(ref: FileRef): void {
+  private async deleteSession(id: string): Promise<void> {
+    const isCurrent = id === this.currentId
+    if (isCurrent && this.running) {
+      this.getUIContext().getPromptAction().showToast({
+        message: '本轮回复仍在进行，请先停止或等待完成',
+        duration: 2500
+      })
+      return
+    }
+    if (this.host.isAcp() && this.openedSessions.has(id)) {
+      try {
+        await this.host.acp.sessionClose(id)
+      } catch (error) {
+        // Best effort: the local rows and the log dir go regardless.
+      }
+    }
+    this.openedSessions.delete(id)
+    await this.store.remove(id)
+    this.deleteSessionLogs(id)
+    this.sessions = await this.store.list(this.currentProjectId)
+    if (!isCurrent) {
+      return
+    }
+    this.running = false
+    this.liveAssistant = null
+    this.traceRow = null
+    this.toolRows.clear()
+    if (this.sessions.length === 0) {
+      this.currentId = newSessionId()
+      this.messages = []
+      this.title = '新会话'
+      await this.ensureAcpCurrentSession()
+      return
+    }
+    const latest = this.sessions[0]
+    this.currentId = latest.id
+    this.messages = await this.store.load(latest.id)
+    this.title = latest.title
+  }
+
+  /**
+   * Rename one conversation locally: index row, cached message blob and —
+   * when it is the open one — the live header. The durable server log keeps
+   * its id; dsh re-derives nothing from the local title.
+   */
+  private async renameSession(id: string, title: string): Promise<void> {
+    const name = title.trim()
+    if (name.length === 0) {
+      return
+    }
+    await this.store.rename(id, name)
+    this.sessions = await this.store.list(this.currentProjectId)
+    if (id === this.currentId) {
+      this.title = name
+    }
+  }
+
+  /** Best-effort removal of the durable log dir dsh keeps per session id. */
+  private deleteSessionLogs(id: string): void {
     if (this.context === null) {
       return
     }
-    let path = ref.path
-    if (!path.startsWith('/')) {
-      path = `${ProjectStore.workspaceDir(this.context, this.currentProjectId)}/${path}`
+    const root = `${this.context.filesDir}/dsh-home/sessions`
+    try {
+      if (!fs.accessSync(root)) {
+        return
+      }
+      const slugs = fs.listFileSync(root)
+      for (const slug of slugs) {
+        try {
+          const target = `${root}/${slug}/${id}`
+          if (fs.accessSync(target)) {
+            fs.rmdirSync(target)
+          }
+        } catch (error) {
+          // Keep scanning; the log may sit under another slug.
+        }
+      }
+    } catch (error) {
+      // No readable sessions root — nothing durable to clean.
+    }
+  }
+
+  /**
+   * Resolve a chat file reference to a real sandbox path.
+   *
+   * The transcript only carries what the model typed, and that path is
+   * relative to whichever cwd the *runtime* session had — which is not always
+   * the project the user is looking at now (sessions outlive project
+   * switches, and older turns predate the current project). So every
+   * plausible root is probed and the first existing file wins; a miss still
+   * returns the most likely path so the viewer can show it verbatim.
+   */
+  private resolveFile(ref: FileRef): string {
+    const candidates = this.candidatePaths(ref.path)
+    for (const path of candidates) {
+      try {
+        if (fs.accessSync(path)) {
+          return path
+        }
+      } catch (error) {
+        // Not under this root; keep probing.
+      }
+    }
+    return candidates.length > 0 ? candidates[0] : ''
+  }
+
+  /** Absolute paths pass through; relative ones fan out over every known root. */
+  private candidatePaths(raw: string): string[] {
+    const out: string[] = []
+    if (this.context === null) {
+      return out
+    }
+    let path = raw.trim()
+    if (path.startsWith('file://')) {
+      path = path.substring('file://'.length)
+    }
+    while (path.startsWith('./')) {
+      path = path.substring(2)
+    }
+    if (path.startsWith('/')) {
+      out.push(path)
+      return out
+    }
+    const home = path.startsWith('~/') ? path.substring(2) : ''
+    const relative = home.length > 0 ? home : path
+    const roots: string[] = []
+    const current = this.workspaceOf(this.currentProjectId)
+    if (current.length > 0) {
+      roots.push(current)
+    }
+    roots.push(ProjectStore.workspaceDir(this.context, ProjectStore.DEFAULT_ID))
+    for (const project of this.projects) {
+      roots.push(this.workspaceOf(project.id))
+    }
+    roots.push(this.context.filesDir)
+    const seen = new Set<string>()
+    for (const root of roots) {
+      if (root.length === 0 || seen.has(root)) {
+        continue
+      }
+      seen.add(root)
+      out.push(`${root}/${relative}`)
+    }
+    return out
+  }
+
+  /** Open a workspace file referenced from chat in the full-screen cover. */
+  private openFile(ref: FileRef): void {
+    const path = this.resolveFile(ref)
+    if (path.length === 0) {
+      return
     }
     this.viewerPath = path
     this.viewerName = ref.name
@@ -826,6 +1404,71 @@ struct Index {
     this.diagnostics = lines.join('\n')
   }
 
+  /** The project summary when projectId carries a bound user directory. */
+  private boundOf(projectId: string): ProjectSummary | null {
+    for (const project of this.projects) {
+      if (project.id === projectId && project.boundPath !== undefined && project.boundPath.length > 0) {
+        return project
+      }
+    }
+    return null
+  }
+
+  /** Bound user dir wins; otherwise the project's sandbox workspace. */
+  private workspaceOf(projectId: string): string {
+    if (this.context === null) {
+      return ''
+    }
+    const bound = this.boundOf(projectId)
+    if (bound !== null) {
+      return bound.boundPath === undefined ? '' : bound.boundPath
+    }
+    return ProjectStore.workspaceDir(this.context, projectId)
+  }
+
+  /** Long-press "绑定用户目录": pick a folder, persist + activate the grant. */
+  private async bindProjectDir(id: string): Promise<void> {
+    if (this.context === null) {
+      return
+    }
+    try {
+      const granted = await DirGrant.grant(this.context)
+      await this.projectStore.bindDir(id, granted.uri, granted.path, granted.label)
+      this.projects = await this.projectStore.list()
+      this.getUIContext().getPromptAction().showToast({
+        message: `已绑定「${granted.label}」，该项目新会话将在该目录工作`,
+        duration: 2500
+      })
+    } catch (error) {
+      this.getUIContext().getPromptAction().showToast({
+        message: (error as Error).message,
+        duration: 2500
+      })
+    }
+  }
+
+  /** Long-press "解绑用户目录": revoke the grant, fall back to the sandbox dir. */
+  private async unbindProjectDir(id: string): Promise<void> {
+    const bound = this.boundOf(id)
+    if (this.context === null || bound === null) {
+      return
+    }
+    try {
+      await DirGrant.revoke(bound.boundUri === undefined ? '' : bound.boundUri)
+      await this.projectStore.unbindDir(id)
+      this.projects = await this.projectStore.list()
+      this.getUIContext().getPromptAction().showToast({
+        message: '已解绑，该项目新会话将回到应用沙箱工作区',
+        duration: 2500
+      })
+    } catch (error) {
+      this.getUIContext().getPromptAction().showToast({
+        message: (error as Error).message,
+        duration: 2500
+      })
+    }
+  }
+
   @Builder
   settingsSheet() {
     SettingsSheet({
@@ -864,6 +1507,12 @@ struct Index {
       onNew: () => {
         void this.newSession()
       },
+      onDeleteSession: (id: string) => {
+        void this.deleteSession(id)
+      },
+      onRenameSession: (id: string, title: string) => {
+        void this.renameSession(id, title)
+      },
       onSelectProject: (id: string) => {
         void this.selectProject(id)
       },
@@ -875,6 +1524,25 @@ struct Index {
       },
       onDeleteProject: (id: string) => {
         void this.deleteProject(id)
+      },
+      onBindProjectDir: (id: string) => {
+        void this.bindProjectDir(id)
+      },
+      onUnbindProjectDir: (id: string) => {
+        void this.unbindProjectDir(id)
+      }
+    })
+  }
+
+  @Builder
+  filesSheet() {
+    FilesPanel({
+      projectName: this.currentProjectName(),
+      workspacePath: this.workspaceOf(this.currentProjectId),
+      refreshTick: this.filesTick,
+      onOpenFile: (path: string, name: string) => {
+        const ref: FileRef = { path: path, name: name }
+        this.openFile(ref)
       }
     })
   }
@@ -921,6 +1589,9 @@ struct Index {
                 onNew: () => {
                   void this.newSession()
                 },
+                onDeleteSession: (id: string) => {
+                  void this.deleteSession(id)
+                },
                 onSelectProject: (id: string) => {
                   void this.selectProject(id)
                 },
@@ -932,6 +1603,12 @@ struct Index {
                 },
                 onDeleteProject: (id: string) => {
                   void this.deleteProject(id)
+                },
+                onBindProjectDir: (id: string) => {
+                  void this.bindProjectDir(id)
+                },
+                onUnbindProjectDir: (id: string) => {
+                  void this.unbindProjectDir(id)
                 }
               })
                 .width(260)
@@ -946,8 +1623,10 @@ struct Index {
                 showModelPicker: this.showModelPicker,
                 modelLabel: this.modelLabel,
                 canStop: this.host.isAcp(),
-                onSend: (text: string) => {
-                  void this.send(text)
+                shareText: this.shareText,
+                attachPaths: this.attachPaths,
+                onSend: (text: string, attachPaths: string[]) => {
+                  void this.send(text, attachPaths)
                 },
                 onNewSession: () => {
                   void this.newSession()
@@ -956,13 +1635,35 @@ struct Index {
                   this.refreshDiagnostics()
                   this.showSettings = true
                 },
+                onOpenFiles: () => {
+                  this.filesTick += 1
+                  this.showFiles = true
+                },
                 onPickModel: () => {
                   this.showModelSheet = true
                 },
                 onStop: () => this.stopAcp(),
-                onOpenFile: (ref: FileRef) => this.openFile(ref)
+                onOpenFile: (ref: FileRef) => this.openFile(ref),
+                onResolveFile: (ref: FileRef) => this.resolveFile(ref),
+                onShareTextConsumed: () => {
+                  this.shareText = ''
+                },
+                onRemoveAttachment: () => {
+                  this.attachPaths = []
+                },
+                onPickImage: () => {
+                  void this.pickImage()
+                }
               })
                 .layoutWeight(1)
+                .bindSheet($$this.showFiles, this.filesSheet(), {
+                  height: SheetSize.LARGE,
+                  dragBar: true,
+                  showClose: false,
+                  onDisappear: () => {
+                    this.showFiles = false
+                  }
+                })
             }
             .width('100%')
             .height('100%')
@@ -977,8 +1678,10 @@ struct Index {
                 modelLabel: this.modelLabel,
                 canStop: this.host.isAcp(),
                 showSessionsEntry: true,
-                onSend: (text: string) => {
-                  void this.send(text)
+                shareText: this.shareText,
+                attachPaths: this.attachPaths,
+                onSend: (text: string, attachPaths: string[]) => {
+                  void this.send(text, attachPaths)
                 },
                 onNewSession: () => {
                   void this.newSession()
@@ -990,11 +1693,33 @@ struct Index {
                 onOpenSessions: () => {
                   this.showSessions = true
                 },
+                onOpenFiles: () => {
+                  this.filesTick += 1
+                  this.showFiles = true
+                },
                 onPickModel: () => {
                   this.showModelSheet = true
                 },
                 onStop: () => this.stopAcp(),
-                onOpenFile: (ref: FileRef) => this.openFile(ref)
+                onOpenFile: (ref: FileRef) => this.openFile(ref),
+                onResolveFile: (ref: FileRef) => this.resolveFile(ref),
+                onShareTextConsumed: () => {
+                  this.shareText = ''
+                },
+                onRemoveAttachment: () => {
+                  this.attachPaths = []
+                },
+                onPickImage: () => {
+                  void this.pickImage()
+                }
+              })
+              .bindSheet($$this.showFiles, this.filesSheet(), {
+                height: SheetSize.LARGE,
+                dragBar: true,
+                showClose: false,
+                onDisappear: () => {
+                  this.showFiles = false
+                }
               })
             }
             .width('100%')
@@ -1002,6 +1727,7 @@ struct Index {
             .bindSheet($$this.showSessions, this.sessionsSheet(), {
               height: SheetSize.LARGE,
               dragBar: true,
+              showClose: false,
               onDisappear: () => {
                 this.showSessions = false
               }
