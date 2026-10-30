@@ -412,24 +412,29 @@ function codeFamily(lang: string): string {
 }
 
 /** Token color per kind; palette tuned for the light code background. */
+/**
+ * Syntax palette. GitHub-light hues, nudged darker so every token clears
+ * 4.5:1 against the #F6F8FA panel — the old comment grey (#6E7781) sat right
+ * at the edge and read as disabled text on a phone screen.
+ */
 function codeTokenColor(kind: string): ResourceColor {
   if (kind === 'comment') {
-    return '#6E7781'
+    return '#57606A'
   }
   if (kind === 'string') {
     return '#0A3069'
   }
   if (kind === 'keyword') {
-    return '#CF222E'
+    return '#B3122B'
   }
   if (kind === 'number') {
     return '#0550AE'
   }
   if (kind === 'tag') {
-    return '#116329'
+    return '#0F5323'
   }
   if (kind === 'attr') {
-    return '#953800'
+    return '#7D3C00'
   }
   return $r('app.color.text_primary')
 }
@@ -785,32 +790,45 @@ struct MdBlockView {
       .clip(true)
     } else if (this.block.kind === MdKind.Code) {
       Column() {
-        Row({ space: 8 }) {
+        // Header strip: language label on the left, actions pinned right.
+        // The label must NOT take layoutWeight — that stretched it to the
+        // full row and shoved the buttons to the far edge of the screen.
+        Row() {
           Text(this.block.lang.length > 0 ? this.block.lang : '代码')
             .fontSize(10)
+            .fontWeight(FontWeight.Medium)
+            .letterSpacing(0.4)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: 240 })
-            .layoutWeight(1)
-            .fontColor($r('app.color.text_tertiary'))
-          if (this.canPreview()) {
-            Text(this.previewing ? '收起预览' : '预览')
+            .constraintSize({ maxWidth: 180 })
+            .fontColor($r('app.color.text_secondary'))
+
+          Blank()
+
+          Row({ space: 6 }) {
+            if (this.canPreview()) {
+              Text(this.previewing ? '收起预览' : '预览')
+                .fontSize(11)
+                .fontColor($r('app.color.brand'))
+                .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                .backgroundColor($r('app.color.surface'))
+                .borderRadius(7)
+                .onClick(() => this.togglePreview())
+            }
+            Text('复制')
               .fontSize(11)
               .fontColor($r('app.color.brand'))
               .padding({ left: 10, right: 10, top: 4, bottom: 4 })
               .backgroundColor($r('app.color.surface'))
-              .borderRadius(8)
-              .onClick(() => this.togglePreview())
+              .borderRadius(7)
+              .onClick(() => this.copyCode())
           }
-          Text('复制')
-            .fontSize(11)
-            .fontColor($r('app.color.brand'))
-            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-            .backgroundColor($r('app.color.surface'))
-            .borderRadius(8)
-            .onClick(() => this.copyCode())
+          .alignItems(VerticalAlign.Center)
         }
         .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 12, right: 8, top: 6, bottom: 6 })
+        .backgroundColor($r('app.color.code_header'))
 
         if (this.previewing && this.previewPath.length > 0) {
           Web({ src: `file://${this.previewPath}`, controller: this.controller })
@@ -820,13 +838,23 @@ struct MdBlockView {
             .height(320)
             .borderRadius(8)
         } else {
-          CodeText({ code: this.block.text, lang: this.block.lang })
-            .padding(10)
+          Scroll() {
+            CodeText({ code: this.block.text, lang: this.block.lang })
+              .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+          }
+          .width('100%')
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Auto)
+          .align(Alignment.TopStart)
         }
       }
       .alignItems(HorizontalAlign.Start)
+      .width('100%')
       .backgroundColor($r('app.color.code_background'))
       .borderRadius(10)
+      // A hairline border separates the block from the page; without it the
+      // light-grey panel dissolved into the white transcript.
+      .border({ width: 1, color: $r('app.color.code_border') })
       .clip(true)
     } else if (this.block.kind === MdKind.Heading) {
       InlineText({

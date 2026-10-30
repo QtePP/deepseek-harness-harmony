@@ -23,3 +23,6 @@ entry/src/main/resources/rawfile/dsh-payload.zip
 
 # Local signing material backup (restore to re-enable debug signing)
 build-profile.signing.json5
+
+# Pinned local devecocli path (machine-specific, see scripts/deploy.sh)
+/.deveco-cli-path

@@ -3,6 +3,9 @@ import { webview } from '@kit.ArkWeb'
 import { fileIo as fs } from '@kit.CoreFileKit'
 import { BusinessError } from '@kit.BasicServicesKit'
 import { ChatMessage, Role, ToolTrace } from '../model/ChatModel'
+import { attachmentNote, stagedImageHint, thumbnailLabel } from '../common/AttachmentCopy'
+import { NodeKind, kindAccent, kindGlyph, kindTint, kindVerb, statusLabel, toolKindOf } from '../common/TimelineNode'
+import { isWriteTool } from '../model/Rollback'
 import { MdText, copyTextToClipboard } from './Markdown'
 
 /** One text or code segment produced by the minimal Markdown splitter. */
@@ -22,6 +25,14 @@ const PREVIEW_EXTS: string[] = [
   'md', 'txt', 'json', 'csv'
 ]
 
+/** Activity bar geometry: grows per step, pins at BAR_MAX_WIDTH. */
+const BAR_SEGMENT_WIDTH: number = 10
+const BAR_SEGMENT_GAP: number = 3
+const BAR_MAX_WIDTH: number = 120
+
+/** The timeline grows with its content and scrolls only past this height. */
+const TIMELINE_MAX_HEIGHT: number = 280
+
 function isPreviewExt(ext: string): boolean {
   for (const item of PREVIEW_EXTS) {
     if (item === ext) {
@@ -34,6 +45,47 @@ function isPreviewExt(ext: string): boolean {
 function basenameOf(path: string): string {
   const slash = path.lastIndexOf('/')
   return slash >= 0 ? path.substring(slash + 1) : path
+}
+
+/**
+ * File paths a tool call's argument digest names.
+ *
+ * dsh sends write/edit arguments as XML-ish blocks —
+ * `<path>/data/…/a.md</path>\n<type>file</type>…` — so the path is read from
+ * inside `<path>`. A digest that is a bare path (some tools send one) is taken
+ * as-is. Anything still carrying markup is rejected rather than guessed at.
+ */
+function pathsInToolInput(input: string): string[] {
+  const out: string[] = []
+  if (input.length === 0) {
+    return out
+  }
+  const open = '<path>'
+  const close = '</path>'
+  let cursor = 0
+  while (cursor < input.length) {
+    const start = input.indexOf(open, cursor)
+    if (start < 0) {
+      break
+    }
+    const end = input.indexOf(close, start + open.length)
+    if (end < 0) {
+      break
+    }
+    const value = input.substring(start + open.length, end).trim()
+    if (value.length > 0 && out.indexOf(value) < 0) {
+      out.push(value)
+    }
+    cursor = end + close.length
+  }
+  if (out.length === 0) {
+    // No <path> wrapper: accept the whole digest only when it is one clean path.
+    const flat = input.trim()
+    if (flat.length > 0 && flat.indexOf('<') < 0 && flat.indexOf('\n') < 0) {
+      out.push(flat)
+    }
+  }
+  return out
 }
 
 /**
@@ -229,6 +281,13 @@ export interface ArtifactItem {
   resolved: string
   /** Whether the file exists right now. */
   exists: boolean
+  /**
+   * Name of the project that owns the file when it lives outside the open
+   * project's workspace; '' when the file belongs to the current project.
+   * Reading a sibling project's file is legitimate, but the chip names the
+   * owner so the conversation never looks like it produced that file.
+   */
+  foreign: string
 }
 
 /** Extensions the dock can render live in its embedded Web pane. */
@@ -308,6 +367,19 @@ export struct ArtifactDock {
     }
   }
 
+  /**
+   * Card subtitle. A chip that resolved into a sibling project says so — the
+   * file opens fine, but it is not something this conversation produced, and
+   * silently presenting it as an artifact is what made "wrong directory" reads
+   * look like the app losing track of files.
+   */
+  private cardStatus(item: ArtifactItem): string {
+    if (item.foreign.length > 0) {
+      return `来自「${item.foreign}」`
+    }
+    return item.exists ? '点击预览' : '文件未找到'
+  }
+
   @Builder
   card(item: ArtifactItem) {
     Column({ space: 4 }) {
@@ -324,7 +396,7 @@ export struct ArtifactDock {
       }
       .width('100%')
 
-      Text(item.exists ? '点击预览' : '文件未找到')
+      Text(this.cardStatus(item))
         .fontSize(9)
         .fontColor($r('app.color.text_tertiary'))
     }
@@ -401,9 +473,16 @@ export struct ArtifactDock {
                     this.card(item)
                   }, (item: ArtifactItem) => `${item.path}.${item.exists}`)
                 }
+                .width('100%')
+                // Cards hug the left edge: a short list must not drift to the
+                // centre of the scroll viewport (Row defaults to centred when
+                // it is stretched by a full-width parent).
+                .justifyContent(FlexAlign.Start)
+                .alignItems(VerticalAlign.Top)
               }
               .scrollable(ScrollDirection.Horizontal)
               .scrollBar(BarState.Off)
+              .align(Alignment.Start)
               .width('100%')
             }
 
@@ -481,6 +560,24 @@ struct TraceEntryRow {
   /** Entry detail (arguments + result) is one tap behind the row. */
   @State expanded: boolean = false
 
+  /** What this call does; drives the glyph, the verb and the accent colour. */
+  private kind(): NodeKind {
+    return toolKindOf(this.entry.name)
+  }
+
+  private failed(): boolean {
+    return this.entry.status === 'failed'
+  }
+
+  /** Accent: a failure always wins over the kind colour. */
+  private accent(): ResourceColor {
+    return this.failed() ? $r('app.color.status_danger') : kindAccent(this.kind())
+  }
+
+  private tint(): ResourceColor {
+    return this.failed() ? 'rgba(192,57,43,0.07)' : kindTint(this.kind())
+  }
+
   private summary(): string {
     const lines = this.entry.input.split('\n')
     for (const line of lines) {
@@ -505,58 +602,76 @@ struct TraceEntryRow {
     return `${minutes}m${Math.round(seconds - minutes * 60)}s`
   }
 
+  /**
+   * Rail dot colour. The kind owns the colour so the rail reads as a sequence
+   * of activities; a failure overrides it, and a live call pulses in the kind
+   * colour rather than a generic brand blue.
+   */
   private dotColor(): ResourceColor {
-    if (this.entry.status === 'failed') {
-      return $r('app.color.status_danger')
-    }
-    if (this.entry.status === 'in_progress') {
-      return $r('app.color.brand')
-    }
-    return $r('app.color.status_success')
+    return this.accent()
   }
 
   build() {
     Row({ space: 0 }) {
+      // Same contract as thoughtStep: the dot only, no per-row connector.
       Column() {
-        Column()
-          .height(7)
-          .width(2)
-          .backgroundColor($r('app.color.divider'))
         Circle({ width: 10, height: 10 })
           .fill(Color.White)
           .stroke(this.dotColor())
           .strokeWidth(2.5)
-        Column()
-          .layoutWeight(1)
-          .width(2)
-          .backgroundColor($r('app.color.divider'))
       }
       .width(14)
+      .padding({ top: 4 })
       .alignItems(HorizontalAlign.Center)
 
       Column({ space: 6 }) {
         Row({ space: 8 }) {
+          // Kind glyph: what this call did, readable before the name is parsed.
+          Row() {
+            SymbolGlyph(kindGlyph(this.kind()))
+              .fontSize(11)
+              .fontColor([this.accent()])
+          }
+          .width(20)
+          .height(20)
+          .borderRadius(6)
+          .backgroundColor(this.tint())
+          .justifyContent(FlexAlign.Center)
+
+          Text(kindVerb(this.kind()))
+            .fontSize(11)
+            .fontColor(this.accent())
+
           Text(this.entry.name)
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
-            .fontColor(this.entry.status === 'failed' ?
+            .fontColor(this.failed() ?
               $r('app.color.status_danger') : $r('app.color.text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ maxWidth: 180 })
 
-          if (this.entry.status === 'failed') {
-            Text('失败')
+          // Status chip: only failures and live calls earn one; a plain success
+          // stays quiet so a long run is not a wall of badges.
+          if (this.failed()) {
+            Text(statusLabel(this.entry.status))
               .fontSize(10)
               .fontColor($r('app.color.status_danger'))
+              .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+              .borderRadius(4)
+              .backgroundColor('rgba(192,57,43,0.10)')
+          } else if (this.entry.status === 'in_progress') {
+            LoadingProgress()
+              .width(12)
+              .height(12)
+              .color(this.accent())
           }
+
           if (this.durationLabel().length > 0) {
             Text(this.durationLabel())
               .fontSize(10)
               .fontFamily('monospace')
               .fontColor($r('app.color.text_tertiary'))
-          } else if (this.entry.status === 'in_progress') {
-            LoadingProgress()
-              .width(12)
-              .height(12)
-              .color($r('app.color.brand'))
           }
 
           if (!this.expanded && this.summary().length > 0) {
@@ -616,9 +731,13 @@ struct TraceEntryRow {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      .padding({ left: 8, top: 5, bottom: 5 })
+      .padding({ left: 8, right: 6, top: 2, bottom: 2 })
     }
     .width('100%')
+    // A failed call gets a full-row wash: the colour has to survive a glance,
+    // not just a read of the status chip.
+    .backgroundColor(this.failed() ? 'rgba(192,57,43,0.05)' : Color.Transparent)
+    .borderRadius(8)
     .onClick(() => {
       this.expanded = !this.expanded
     })
@@ -640,10 +759,16 @@ export struct MessageItem {
   @State timelineOverflow: boolean = false
   @State timelineAtTop: boolean = true
   @State timelineAtEnd: boolean = false
-  private timelineContentHeight: number = 0
+  /** Measured content height; @State so the viewport re-hugs as the run grows. */
+  @State timelineContentHeight: number = 0
   private timelineViewportHeight: number = 0
   onOpenFile: (ref: FileRef) => void = () => {}
   onResolveFile: (ref: FileRef) => string = () => ''
+  /** Owning project name when the path is outside the open workspace; '' if local. */
+  onForeignProject: (resolved: string) => string = () => ''
+  /** Long-press menu actions; the shell owns the transcript and the files. */
+  onRollback: (messageId: string) => void = () => {}
+  onFork: (messageId: string) => void = () => {}
   private previewController: webview.WebviewController = new webview.WebviewController()
 
   /** Memoized on the message text: streaming re-renders rescan once per chunk. */
@@ -666,7 +791,7 @@ export struct MessageItem {
    * so the bubble is never crowded. Memoized on the message text: build
    * calls it twice and streaming re-renders every chunk.
    */
-  private webArtifactCache: ArtifactItem = { path: '', name: '', resolved: '', exists: false }
+  private webArtifactCache: ArtifactItem = { path: '', name: '', resolved: '', exists: false, foreign: '' }
   private webArtifactKey: string = ''
 
   private webArtifactOrEmpty(): ArtifactItem {
@@ -678,7 +803,7 @@ export struct MessageItem {
   }
 
   private scanWebArtifact(): ArtifactItem {
-    const empty: ArtifactItem = { path: '', name: '', resolved: '', exists: false }
+    const empty: ArtifactItem = { path: '', name: '', resolved: '', exists: false, foreign: '' }
     if (this.message.role !== Role.ASSISTANT) {
       return empty
     }
@@ -707,7 +832,13 @@ export struct MessageItem {
       if (found !== null) {
         return empty
       }
-      found = { path: ref.path, name: ref.name, resolved: resolved, exists: true }
+      found = {
+        path: ref.path,
+        name: ref.name,
+        resolved: resolved,
+        exists: true,
+        foreign: this.onForeignProject(resolved)
+      }
     }
     return found === null ? empty : found
   }
@@ -802,12 +933,6 @@ export struct MessageItem {
   }
 
   /** Deepening blue ramp for consecutive tool calls (a thought run restarts it); clamps at the deepest shade. */
-  private toolShade(ordinal: number): string {
-    const shades: string[] = ['#8FA4FF', '#6E87FD', '#4D6BFE', '#3A55D9', '#2B40A8', '#1F2F7A']
-    return shades[Math.min(Math.max(ordinal, 1), shades.length) - 1]
-  }
-
-  /** Leading digit run of a usage note number; -1 when there is none. */
   private parseCount(text: string): number {
     let value = 0
     let seen = false
@@ -859,8 +984,11 @@ export struct MessageItem {
   /** Color of one activity-bar segment: tool calls deepen call by call, thought runs carry context pressure. */
   private segmentColor(part: ThinkPart): ResourceColor {
     if (part.kind === 'tool' && part.entry !== null) {
-      return part.entry.status === 'failed' ?
-        $r('app.color.status_danger') : this.toolShade(part.toolIndex)
+      if (part.entry.status === 'failed') {
+        return $r('app.color.status_danger')
+      }
+      // Same taxonomy as the row below: the bar previews what each step did.
+      return kindAccent(toolKindOf(part.entry.name))
     }
     return this.thoughtColor()
   }
@@ -871,13 +999,47 @@ export struct MessageItem {
       this.timelineContentHeight > this.timelineViewportHeight + 1
   }
 
-  /** Width of the whole activity bar: hugging the segments, capped so long runs stay compact. */
+  /**
+   * Height of the timeline viewport. It hugs the measured content so a short
+   * run has no empty space under its last node, and pins at the cap once the
+   * run grows long enough to scroll. Before the first measurement the cap is
+   * used so the box cannot collapse and re-measure in a loop.
+   */
+  private timelineHeight(): number {
+    if (this.timelineContentHeight <= 0) {
+      return TIMELINE_MAX_HEIGHT
+    }
+    return Math.min(TIMELINE_MAX_HEIGHT, Math.ceil(this.timelineContentHeight))
+  }
+
+  /**
+   * Width of the whole activity bar. It grows one notch per step as the turn
+   * unfolds, then pins at a fixed cap so a long run stays a compact strip
+   * instead of pushing the label off the row.
+   */
   private barWidth(): number {
     const count = this.thinkParts().length
     if (count <= 0) {
       return 0
     }
-    return Math.min(200, count * 6 + (count - 1) * 3)
+    return Math.min(BAR_MAX_WIDTH, count * BAR_SEGMENT_WIDTH + (count - 1) * BAR_SEGMENT_GAP)
+  }
+
+  /**
+   * Width of a single segment. While the bar is still growing every segment is
+   * the same notch; once the cap is reached the segments share the fixed width
+   * so the bar reads as a full bar rather than a stub that stops early.
+   */
+  private segmentWidth(): number {
+    const count = this.thinkParts().length
+    if (count <= 0) {
+      return 0
+    }
+    const natural = count * BAR_SEGMENT_WIDTH + (count - 1) * BAR_SEGMENT_GAP
+    if (natural <= BAR_MAX_WIDTH) {
+      return BAR_SEGMENT_WIDTH
+    }
+    return Math.max(2, (BAR_MAX_WIDTH - (count - 1) * BAR_SEGMENT_GAP) / count)
   }
 
   /** Single-line preview of a thought run: the first non-empty line. */
@@ -934,8 +1096,7 @@ export struct MessageItem {
           ForEach(this.thinkParts(), (part: ThinkPart, index: number) => {
             Column()
               .height(14)
-              .layoutWeight(1)
-              .constraintSize({ maxWidth: 6 })
+              .width(this.segmentWidth())
               .borderRadius(2)
               .backgroundColor(this.segmentColor(part))
           }, (part: ThinkPart, index: number) =>
@@ -980,25 +1141,36 @@ export struct MessageItem {
         Stack({ alignContent: Alignment.BottomStart }) {
           Stack({ alignContent: Alignment.TopStart }) {
             Scroll() {
-              Column() {
-                ForEach(this.thinkParts(), (part: ThinkPart, index: number) => {
-                  if (part.kind === 'tool' && part.entry !== null) {
-                    TraceEntryRow({ entry: part.entry })
-                  } else if (part.text.length > 0) {
-                    this.thoughtStep(index, part.text)
-                  }
-                }, (part: ThinkPart, index: number) =>
-                  `${index}.${part.kind}.${part.text.length}.${this.expandedThoughts.has(index) ? 1 : 0}`)
+              Stack({ alignContent: Alignment.TopStart }) {
+                // One continuous rail behind every node. Drawn once here so no
+                // row needs layoutWeight to span its own text.
+                Column()
+                  .width(2)
+                  .height('100%')
+                  .margin({ left: 6 })
+                  .backgroundColor($r('app.color.divider'))
+
+                Column() {
+                  ForEach(this.thinkParts(), (part: ThinkPart, index: number) => {
+                    if (part.kind === 'tool' && part.entry !== null) {
+                      TraceEntryRow({ entry: part.entry })
+                    } else if (part.text.length > 0) {
+                      this.thoughtStep(index, part.text)
+                    }
+                  }, (part: ThinkPart, index: number) =>
+                    `${index}.${part.kind}.${part.text.length}.${this.expandedThoughts.has(index) ? 1 : 0}`)
+                }
+                .width('100%')
+                .onAreaChange((oldArea: Area, newArea: Area) => {
+                  const raw = newArea.height
+                  this.timelineContentHeight = typeof raw === 'number' ? raw : 0
+                  this.recomputeTimelineOverflow()
+                })
               }
               .width('100%')
-              .onAreaChange((oldArea: Area, newArea: Area) => {
-                const raw = newArea.height
-                this.timelineContentHeight = typeof raw === 'number' ? raw : 0
-                this.recomputeTimelineOverflow()
-              })
             }
             .width('100%')
-            .constraintSize({ maxHeight: 280 })
+            .height(this.timelineHeight())
             .scrollBar(BarState.Off)
             .edgeEffect(EdgeEffect.Spring)
             .onAreaChange((oldArea: Area, newArea: Area) => {
@@ -1059,28 +1231,32 @@ export struct MessageItem {
   @Builder
   thoughtStep(index: number, text: string) {
     Row({ space: 0 }) {
+      // Only the dot lives in the row; the rail itself is drawn once behind
+      // the whole timeline. A per-row connector would need layoutWeight to
+      // span the text, and inside a height-unbounded row that weight resolves
+      // to the scroll viewport — the empty gap this used to show.
       Column() {
-        Column()
-          .height(7)
-          .width(2)
-          .backgroundColor($r('app.color.divider'))
         Circle({ width: 8, height: 8 })
           .fill(Color.White)
           .stroke(this.thoughtColor())
           .strokeWidth(2)
-        Column()
-          .layoutWeight(1)
-          .width(2)
-          .backgroundColor($r('app.color.divider'))
       }
       .width(14)
+      // Optically centred on the preview line, not on the "思考" caption above
+      // it. Measured on device: caption 31px + 7px gap ⇒ the preview line's
+      // centre sits 58px down, so the 8vp dot starts at 54px (27vp at 2x).
+      .padding({ top: 25 })
       .alignItems(HorizontalAlign.Center)
 
-      Column({ space: 4 }) {
+      Column({ space: 3 }) {
+        // Thought runs stay deliberately quiet: no glyph, no accent pill. The
+        // rail dot carries the colour; the caption only names the phase. That
+        // contrast is what makes the coloured tool rows read as actions.
         Text('思考')
           .fontSize(11)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_tertiary'))
+          .letterSpacing(0.5)
 
         if (this.expandedThoughts.has(index)) {
           Text(text)
@@ -1100,7 +1276,7 @@ export struct MessageItem {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      .padding({ left: 8, top: 5, bottom: 5 })
+      .padding({ left: 8, top: 2, bottom: 2 })
     }
     .width('100%')
     .onClick(() => {
@@ -1192,6 +1368,69 @@ export struct MessageItem {
     })
   }
 
+  /**
+   * Label above the bubble. Image turns get prose instead of the stored
+   * literal; every other note (tool names, usage digests) passes through.
+   */
+  private displayNote(): string {
+    return attachmentNote(this.message.note, this.message.images.length)
+  }
+
+  /**
+   * Long-press menu: copy the text, fork a new branch here, or roll the
+   * transcript (and the files the turn wrote) back to before this message.
+   * Rollback is destructive, so it asks first.
+   */
+  private openActions(): void {
+    if (this.message.role !== Role.USER && this.message.role !== Role.ASSISTANT) {
+      this.copyMessage()
+      return
+    }
+    this.getUIContext().showActionSheet({
+      title: '这条消息',
+      message: this.message.role === Role.USER
+        ? '回撤会删除这条消息之后的所有内容，并还原该轮改动的文件。'
+        : '回撤会删除这条回复及其之后的所有内容，并还原该轮改动的文件。',
+      autoCancel: true,
+      confirm: {
+        value: '取消',
+        action: () => {}
+      },
+      sheets: [
+        {
+          title: '复制全文',
+          action: () => this.copyMessage()
+        },
+        {
+          title: '从此处分支（保留原会话）',
+          action: () => this.onFork(this.message.id)
+        },
+        {
+          title: '回撤到这条消息之前',
+          action: () => this.confirmRollback()
+        }
+      ]
+    })
+  }
+
+  /** Second confirmation: the file restore cannot be undone. */
+  private confirmRollback(): void {
+    this.getUIContext().showAlertDialog({
+      title: '回撤到这里？',
+      message: '将删除这条消息及其后的所有内容，并把该轮写入的文件恢复到之前的状态。此操作不可撤销。',
+      autoCancel: true,
+      primaryButton: {
+        value: '取消',
+        action: () => {}
+      },
+      secondaryButton: {
+        value: '回撤',
+        fontColor: $r('app.color.status_danger'),
+        action: () => this.onRollback(this.message.id)
+      }
+    })
+  }
+
   /** Long-press a bubble to copy the full raw message text onto the clipboard. */
   private copyMessage(): void {
     copyTextToClipboard(this.message.text)
@@ -1208,8 +1447,8 @@ export struct MessageItem {
       if (this.message.role === Role.TOOL) {
         this.toolRow()
       } else {
-        if (this.message.note.length > 0) {
-          Text(this.message.note)
+        if (this.displayNote().length > 0) {
+          Text(this.displayNote())
             .fontSize(11)
             .fontColor($r('app.color.text_tertiary'))
             .maxLines(2)
@@ -1270,7 +1509,7 @@ export struct MessageItem {
           .backgroundColor(this.hasBubble() ? $r('app.color.bubble_user') : Color.Transparent)
           .borderRadius(this.hasBubble() ? 16 : 0)
           .constraintSize({ maxWidth: '92%' })
-          .gesture(LongPressGesture().onAction(() => this.copyMessage()))
+          .gesture(LongPressGesture().onAction(() => this.openActions()))
         }
 
         if (this.refs().length > 0) {
@@ -1345,8 +1584,13 @@ export struct ChatView {
   onOpenFiles: () => void = () => {}
   onOpenFile: (ref: FileRef) => void = () => {}
   onResolveFile: (ref: FileRef) => string = () => ''
+  /** True when an absolute path sits outside the open project's workspace. */
+  onForeignProject: (resolved: string) => string = () => ''
   onPickModel: () => void = () => {}
   onStop: () => void = () => {}
+  /** Long-press menu actions, forwarded from the shell. */
+  onRollback: (messageId: string) => void = () => {}
+  onFork: (messageId: string) => void = () => {}
   onShareTextConsumed: () => void = () => {}
   onRemoveAttachment: () => void = () => {}
   onPickImage: () => void = () => {}
@@ -1417,10 +1661,19 @@ export struct ChatView {
   }
 
   /**
-   * Artifacts for the dock, newest first. Both the prose and the tool
-   * arguments are scanned: a file the agent wrote usually appears in the
-   * `path` argument before the answer ever mentions it, and that argument is
-   * the authoritative spelling of the path.
+   * Artifacts for the dock, newest first.
+   *
+   * Two sources, in order of trust:
+   *
+   *  1. The paths a tool call actually named. A write/edit argument carries the
+   *     authoritative spelling under `<path>`, and that file demonstrably
+   *     exists — it is what the turn produced.
+   *  2. Failing that, file-looking runs in the prose. This is a guess: the
+   *     model may mention a file it never created (`demo.txt` in an example),
+   *     so a guessed path is admitted only when it resolves to a real file.
+   *
+   * The old behaviour took the guess as truth, which is why the dock filled up
+   * with "文件未找到" chips for files that never existed.
    */
   private dockItems(): ArtifactItem[] {
     const out: ArtifactItem[] = []
@@ -1429,26 +1682,78 @@ export struct ChatView {
     const oldest = Math.max(0, this.messages.length - 30)
     for (let index = this.messages.length - 1; index >= oldest && out.length < 12; index--) {
       const message = this.messages[index]
+
+      // 1. Authoritative: files this turn's tools actually wrote.
+      for (const trace of message.trace) {
+        if (!isWriteTool(trace.name)) {
+          continue
+        }
+        for (const raw of pathsInToolInput(trace.input)) {
+          if (this.admitArtifact(raw, out, seen, true)) {
+            if (out.length >= 12) {
+              return out
+            }
+          }
+        }
+      }
+
+      // 2. Fallback: filenames mentioned in the text, existence-checked.
       const hay = message.toolInput.length > 0 ? `${message.text}\n${message.toolInput}` : message.text
       if (hay.length === 0) {
         continue
       }
       for (const ref of refsFromText(hay, 6, probe)) {
-        if (seen.has(ref.path)) {
-          continue
+        if (this.admitArtifact(ref.path, out, seen, false)) {
+          if (out.length >= 12) {
+            return out
+          }
         }
-        seen.add(ref.path)
-        const resolved = this.onResolveFile(ref)
-        let exists = false
-        try {
-          exists = resolved.length > 0 && fs.accessSync(resolved)
-        } catch (error) {
-          exists = false
-        }
-        out.push({ path: ref.path, name: ref.name, resolved: resolved, exists: exists })
       }
     }
     return out
+  }
+
+  /**
+   * Resolve and admit one candidate. `trusted` paths (from a tool argument)
+   * are shown even when missing — a write that failed is worth seeing — but a
+   * guessed path is dropped unless it exists.
+   */
+  private admitArtifact(raw: string, out: ArtifactItem[], seen: Set<string>,
+    trusted: boolean): boolean {
+    const path = raw.trim()
+    if (path.length === 0) {
+      return false
+    }
+    const ref: FileRef = { path: path, name: basenameOf(path) }
+    const resolved = this.onResolveFile(ref)
+    // Dedupe on the resolved absolute path, not the raw spelling: the same
+    // file reached once as `rollback-test.txt` and once as its absolute path
+    // used to produce two identical cards.
+    const key = resolved.length > 0 ? resolved : path
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    let exists = false
+    try {
+      exists = resolved.length > 0 && fs.accessSync(resolved)
+    } catch (error) {
+      exists = false
+    }
+    if (!trusted && !exists) {
+      return false
+    }
+    if (trusted && !exists && resolved.length === 0) {
+      return false
+    }
+    out.push({
+      path: path,
+      name: basenameOf(path),
+      resolved: resolved,
+      exists: exists,
+      foreign: this.onForeignProject(resolved)
+    })
+    return true
   }
 
   private refreshArtifacts(): void {
@@ -1637,7 +1942,10 @@ export struct ChatView {
                   message: item,
                   running: this.running && index === this.messages.length - 1,
                   onOpenFile: this.onOpenFile,
-                  onResolveFile: this.onResolveFile
+                  onResolveFile: this.onResolveFile,
+                  onForeignProject: this.onForeignProject,
+                  onRollback: this.onRollback,
+                  onFork: this.onFork
                 })
               }
             }, (item: ChatMessage) => item.id)
@@ -1691,16 +1999,18 @@ export struct ChatView {
         }
 
         if (this.attachPaths.length > 0) {
-          Column({ space: 6 }) {
+          Column({ space: 8 }) {
             Row({ space: 8 }) {
               Scroll() {
                 Row({ space: 8 }) {
-                  ForEach(this.attachPaths, (path: string) => {
+                  ForEach(this.attachPaths, (path: string, index: number) => {
                     Image(`file://${path}`)
-                      .width(40)
-                      .height(40)
-                      .borderRadius(10)
+                      .width(44)
+                      .height(44)
+                      .borderRadius(11)
                       .objectFit(ImageFit.Cover)
+                      .border({ width: 1, color: 'rgba(0,0,0,0.06)' })
+                      .accessibilityText(thumbnailLabel(path, index, this.attachPaths.length))
                   }, (path: string) => path)
                 }
               }
@@ -1709,17 +2019,19 @@ export struct ChatView {
               .align(Alignment.Start)
               .layoutWeight(1)
 
-              Text('✕')
-                .fontSize(14)
+              Text('移除')
+                .fontSize(11)
                 .fontColor($r('app.color.text_secondary'))
                 .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                .borderRadius(8)
+                .backgroundColor($r('app.color.surface'))
                 .onClick(() => this.onRemoveAttachment())
             }
             .width('100%')
             .alignItems(VerticalAlign.Center)
 
-            Text(`${this.attachPaths.length} 张图片将随下一条消息发送`)
-              .fontSize(10)
+            Text(stagedImageHint(this.attachPaths.length))
+              .fontSize(11)
               .fontColor($r('app.color.text_tertiary'))
           }
           .alignItems(HorizontalAlign.Start)

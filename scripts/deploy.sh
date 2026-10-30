@@ -25,18 +25,41 @@ restore_profile() {
 }
 trap restore_profile EXIT
 
-DEVECO_CLI="${DEVECO_CLI:-devecocli}"
 DEVICE="${1:-}"
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# CLI 解析优先级：显式 DEVECO_CLI > 仓库钉死路径 > PATH。
+# 本机装过多份 devecocli（homebrew / DevEco Code 自带 / managed node），PATH 顺序会漂，
+# 所以钉死一份到 .deveco-cli-path（gitignored，本机专用）。
+PINNED_CLI_FILE="$ROOT/.deveco-cli-path"
+resolve_deveco_cli() {
+  # 所有诊断输出走 stderr：本函数在 $(...) 里执行，stdout 只留最终路径。
+  if [ -n "${DEVECO_CLI:-}" ]; then
+    if [ -x "$DEVECO_CLI" ] || command -v "$DEVECO_CLI" >/dev/null 2>&1; then
+      echo "$DEVECO_CLI"
+    else
+      die "DEVECO_CLI 指向的 devecocli 不存在：$DEVECO_CLI"
+    fi
+    return
+  fi
+  if [ -f "$PINNED_CLI_FILE" ]; then
+    local pinned; pinned="$(head -1 "$PINNED_CLI_FILE" | tr -d '[:space:]')"
+    if [ -n "$pinned" ] && [ -x "$pinned" ]; then echo "$pinned"; return; fi
+    warn "钉死的 devecocli 不可用（${pinned:-空文件}），回落到 PATH 查找" >&2
+  fi
+  echo "devecocli"
+}
+DEVECO_CLI="$(resolve_deveco_cli)"
+
 # 1. 工具检查
 command -v "$DEVECO_CLI" >/dev/null 2>&1 || die "找不到 devecocli。先装：
-  npm install -g @deveco/deveco-cli@stable
-或把已装的目录加进 PATH：
-  export PATH=\"/Users/apple/.workbuddy-ai/binaries/node/versions/22.22.2-6/bin:\$PATH\""
+  npm install -g @deveco/deveco-cli@latest
+或把一份装的绝对路径写进 .deveco-cli-path（gitignored）：
+  echo /path/to/devecocli > .deveco-cli-path"
+say "CLI：$DEVECO_CLI ($("$DEVECO_CLI" --version 2>/dev/null | head -1))"
 
 # 2. 设备检查
 say "检查已连接设备…"
@@ -51,17 +74,33 @@ if echo "$DEVICES" | grep -qi "No active devices"; then
 fi
 
 if [ -z "$DEVICE" ]; then
-  DEVICE="$(echo "$DEVICES" | grep -oE '\b[0-9A-Za-z]{8,}\b' | head -1 || true)"
+  # 设备名含空格（如 "HUAWEI Mate 90 Pro Max 典藏版"），列位置不可靠：
+  # 只认「同一行里既有序列号形态、又有 device 字样」的数据行，表头/提示行一律跳过。
+  DEVICE="$(echo "$DEVICES" \
+    | grep -vE '^(Name[[:space:]]|-)' \
+    | awk '{
+        for (i = 1; i <= NF; i++) {
+          if ($i ~ /^[0-9A-Za-z]{8,}$/ && ($i ~ /[0-9]/) && ($(i+1) == "device")) {
+            print $i; exit
+          }
+        }
+      }')"
   [ -n "$DEVICE" ] || die "无法从设备列表解析序列号，请手动传入：bash scripts/deploy.sh <serial>"
 fi
 say "目标设备：$DEVICE"
 
 # 3. 登录（签名必需，华为账号）
-if ! "$DEVECO_CLI" auth status 2>&1 | grep -qi "logged in"; then
+# 坑：auth status 未登录时退出码仍是 0，且输出 "Not logged in" 本身就含 "logged in" 子串，
+# 所以必须先排除 "Not logged in" 再匹配，否则登录分支永远不触发（已实测）。
+AUTH_STATUS="$("$DEVECO_CLI" auth status 2>&1 || true)"
+if echo "$AUTH_STATUS" | grep -qiE '\bnot logged in\b' \
+   || ! echo "$AUTH_STATUS" | grep -qiE '\blogged in\b'; then
   say "尚未登录，开始登录（会打开浏览器或给出设备码）…"
-  "$DEVECO_CLI" auth login
+  "$DEVECO_CLI" auth login || die "登录失败。签名需要有效华为账号：devecocli auth status 查状态，devecocli auth team 查团队。"
+  AUTH_STATUS="$("$DEVECO_CLI" auth status 2>&1 || true)"
+  echo "$AUTH_STATUS" | grep -qiE '\bnot logged in\b' && die "登录后仍未生效，请手动执行 devecocli auth login"
 fi
-say "账号状态：$("$DEVECO_CLI" auth status 2>&1 | head -1)"
+say "账号状态：$(echo "$AUTH_STATUS" | head -1)"
 
 # 4. 签名材料（仅在缺失时检出/生成；构建后由 trap 还原开源口径）
 if grep -qE 'signingConfigs:[[:space:]]*\[[[:space:]]*\]' build-profile.json5; then

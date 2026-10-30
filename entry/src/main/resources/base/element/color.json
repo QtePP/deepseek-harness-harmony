@@ -54,7 +54,15 @@
     },
     {
       "name": "code_background",
-      "value": "#F1F2F5"
+      "value": "#F6F8FA"
+    },
+    {
+      "name": "code_header",
+      "value": "#EDF0F4"
+    },
+    {
+      "name": "code_border",
+      "value": "#D8DEE6"
     },
     {
       "name": "status_success",

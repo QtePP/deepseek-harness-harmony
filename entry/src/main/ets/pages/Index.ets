@@ -14,7 +14,8 @@ import { ProjectStore, ProjectSummary } from '../model/ProjectModel'
 import { renderBlocks, RenderedBlock } from '../model/DshClient'
 import { DirGrant } from '../host/DirGrant'
 import { ShareInbox } from '../model/ShareInbox'
-import { EventLike, SessionEventPayload, SessionStatusPayload } from '../model/Protocol'
+import { FileTouch, RollbackReport, SnapshotStore, writePathsOf } from '../model/Rollback'
+import { EventLike, LinkState, SessionEventPayload, SessionStatusPayload } from '../model/Protocol'
 import {
   AcpConfigOption, AcpContentBlock, AcpModelChoice, AcpPermissionRequest, AcpSessionNewResult,
   AcpSetConfigResult, AcpUpdatePayload, findConfigOption, flattenChoices, textOfUpdateContent,
@@ -137,6 +138,14 @@ struct Index {
   private turnInFlight: boolean = false
   /** A drop that arrived while the reconnect chain was already running. */
   private redispatchDisconnect: string = ''
+  /** Pre-turn file snapshots, keyed by turn key (see Rollback.ets). */
+  private snapshots: SnapshotStore = new SnapshotStore()
+  /** Files each rollback-able turn touched, keyed by turn key. */
+  private turnTouches: Map<string, FileTouch[]> = new Map<string, FileTouch[]>()
+  /** The turn currently accepting touches; '' when no turn is running. */
+  private activeTurnKey: string = ''
+  /** Per-message turn key, so a long-press can name the turn it rolls back. */
+  private messageTurn: Map<string, string> = new Map<string, string>()
 
   aboutToAppear(): void {
     ShareInbox.setListener((text: string, imagePath: string, imageName: string) => {
@@ -183,6 +192,7 @@ struct Index {
     this.pluginRows = PluginCatalog.rows(PluginConfig.disabled)
     await this.projectStore.init(context)
     this.projects = await this.projectStore.list()
+    this.snapshots.init(context.filesDir)
     // Re-activate persisted directory grants so bound project workspaces are
     // reachable at their real paths; failure is non-fatal (the affected
     // project surfaces a clear error when its session opens).
@@ -366,6 +376,172 @@ struct Index {
     }
     await this.store.save(this.currentId, this.currentProjectId, this.title, this.messages)
     this.sessions = await this.store.list(this.currentProjectId)
+  }
+
+  // ---------------------------------------------------------------- rollback
+
+  /** Open a new rollback-able turn and bind its key to the user message. */
+  private beginTurn(userMessageId: string): void {
+    const key = `${this.currentId}.${Date.now()}`
+    this.activeTurnKey = key
+    this.turnTouches.set(key, [])
+    this.messageTurn.set(userMessageId, key)
+  }
+
+  /**
+   * Record the pre-turn state of every path a write call names. Called on
+   * `tool_call`, before the tool body runs, which is the only moment the old
+   * bytes are still on disk.
+   */
+  private captureTouches(name: string, raw: Record<string, Object> | undefined): void {
+    if (this.activeTurnKey.length === 0 || !this.snapshots.ready()) {
+      return
+    }
+    // Same cwd the session itself was opened with, so a relative tool path
+    // resolves to the file the tool actually wrote.
+    const cwd = this.workspaceOf(this.currentProjectId)
+    for (const path of writePathsOf(name, raw, cwd)) {
+      const list = this.turnTouches.get(this.activeTurnKey)
+      if (list === undefined) {
+        continue
+      }
+      // One snapshot per path per turn: a later write to the same file must
+      // not overwrite the original bytes with the turn's own intermediate.
+      let seen = false
+      for (const touch of list) {
+        if (touch.path === path) {
+          seen = true
+          break
+        }
+      }
+      if (seen) {
+        continue
+      }
+      const touch = this.snapshots.capture(this.activeTurnKey, path)
+      if (touch !== null) {
+        list.push(touch)
+      }
+    }
+  }
+
+  /** Close the running turn; snapshots stay so it can still be rolled back. */
+  private endTurn(): void {
+    this.activeTurnKey = ''
+  }
+
+  /**
+   * Roll one turn back: truncate the transcript at the message that opened it,
+   * restore every file the turn touched, then rebuild the server session from
+   * the shortened history. ACP has no truncate verb, so "rewinding" the model
+   * means closing the old session and opening a fresh one.
+   */
+  private async rollbackTurn(messageId: string): Promise<void> {
+    const turnKey = this.messageTurn.get(messageId)
+    const index = this.messageIndex(messageId)
+    if (index < 0) {
+      return
+    }
+    const touches = turnKey === undefined ? [] : this.turnTouches.get(turnKey)
+    const report = new RollbackReport()
+    if (touches !== undefined) {
+      for (const touch of touches) {
+        this.snapshots.revert(touch, report)
+      }
+    }
+    // Drop the message that opened the turn and everything after it: the turn
+    // and its answer are exactly the suffix the user asked to take back.
+    this.messages = this.messages.slice(0, index)
+    this.attachPaths = []
+    this.traceRow = null
+    this.toolRows.clear()
+    this.liveAssistant = null
+    this.endTurn()
+    if (turnKey !== undefined) {
+      this.snapshots.discard(turnKey)
+      this.turnTouches.delete(turnKey)
+      this.messageTurn.delete(messageId)
+    }
+    await this.persist()
+    await this.rebuildServerSession()
+    this.toastRollback(report, index)
+  }
+
+  private messageIndex(messageId: string): number {
+    for (let i = 0; i < this.messages.length; i++) {
+      if (this.messages[i].id === messageId) {
+        return i
+      }
+    }
+    return -1
+  }
+
+  private toastRollback(report: RollbackReport, remaining: number): void {
+    const parts: string[] = []
+    if (report.restored > 0) {
+      parts.push(`还原 ${report.restored} 个文件`)
+    }
+    if (report.deleted > 0) {
+      parts.push(`删除 ${report.deleted} 个新增文件`)
+    }
+    if (report.failed > 0) {
+      parts.push(`${report.failed} 个未能回退`)
+    }
+    const filePart = parts.length > 0 ? `，${parts.join('、')}` : ''
+    const message = remaining === 0
+      ? `已回撤到会话开头${filePart}`
+      : `已回撤到该消息之前${filePart}`
+    this.getUIContext().getPromptAction().showToast({ message: message, duration: 2500 })
+  }
+
+  /**
+   * Fork: copy the transcript up to (not including) the chosen message into a
+   * new session and switch to it. The original session is left untouched, so
+   * the user can explore an alternative without losing the first branch.
+   */
+  private async forkFrom(messageId: string): Promise<void> {
+    const index = this.messageIndex(messageId)
+    if (index <= 0) {
+      return
+    }
+    const kept = this.messages.slice(0, index)
+    const forkId = newSessionId()
+    const forkTitle = `${this.title.length > 0 ? this.title : '会话'} · 分支`
+    await this.store.save(forkId, this.currentProjectId, forkTitle, kept)
+    this.currentId = forkId
+    this.title = forkTitle
+    this.messages = kept
+    this.openedSessions.delete(forkId)
+    this.traceRow = null
+    this.toolRows.clear()
+    this.liveAssistant = null
+    this.sessions = await this.store.list(this.currentProjectId)
+    await this.ensureAcpSession()
+    this.getUIContext().getPromptAction().showToast({
+      message: `已从该消息分支出新会话（保留 ${kept.length} 条）`,
+      duration: 2500
+    })
+  }
+
+  /**
+   * Replace the server-side session with one built from the shortened
+   * transcript. `session/close` retires the old id; the next prompt lazily
+   * opens a fresh session whose history is exactly what is on screen.
+   */
+  private async rebuildServerSession(): Promise<void> {
+    const oldId = this.currentId
+    this.openedSessions.delete(oldId)
+    try {
+      if (this.host.isAcp() && this.host.acp.getState() === LinkState.READY) {
+        await this.host.acp.sessionClose(oldId)
+      }
+    } catch (error) {
+      // A session that was never opened server-side has nothing to close.
+    }
+    this.currentId = newSessionId()
+    this.openedSessions.delete(this.currentId)
+    this.toolRows.clear()
+    this.traceRow = null
+    this.liveAssistant = null
   }
 
   /**
@@ -553,7 +729,9 @@ struct Index {
     if (this.messages.length === 0) {
       this.title = titleOf(text.length > 0 ? text : '图片请求')
     }
-    const user = new ChatMessage(newSessionId(), Role.USER, text, attachPaths.length > 0 ? '附件图片' : '')
+    // The label is derived from the image count at render time; storing a
+    // literal here would freeze today's wording into persisted history.
+    const user = new ChatMessage(newSessionId(), Role.USER, text, '')
     for (const path of attachPaths) {
       user.images.push(path)
     }
@@ -572,11 +750,15 @@ struct Index {
     this.traceRow = null
     this.toolRows.clear()
     this.turnInFlight = true
+    // Open the rollback window before the prompt goes out, so tool calls that
+    // arrive during this turn have somewhere to record their snapshots.
+    this.beginTurn(user.id)
     try {
       const result = await this.host.acp.sessionPromptBlocks(this.currentId, blocks)
       this.turnInFlight = false
       this.running = false
       this.liveAssistant = null
+      this.endTurn()
       const stop = result.stopReason === undefined ? '' : result.stopReason
       if (stop === 'cancelled') {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, '本轮已取消', '取消'))
@@ -588,6 +770,7 @@ struct Index {
       this.turnInFlight = false
       this.running = false
       this.liveAssistant = null
+      this.endTurn()
       // A transport drop is explained by the reconnect flow instead; image
       // rejections get targeted advice; everything else stays a send error.
       const message = (error as Error).message
@@ -849,6 +1032,9 @@ struct Index {
       if (entry.status === 'completed' || entry.status === 'failed') {
         entry.doneAt = Date.now()
       }
+      // Snapshot before the write lands: the tool call is announced first, so
+      // this is the last moment the pre-turn bytes still exist on disk.
+      this.captureTouches(name, update.rawInput)
       if (callId.length > 0) {
         this.toolRows.set(callId, entry)
       }
@@ -1239,6 +1425,39 @@ struct Index {
    * plausible root is probed and the first existing file wins; a miss still
    * returns the most likely path so the viewer can show it verbatim.
    */
+  /**
+   * Which project a resolved path belongs to, or '' when it is the open one.
+   *
+   * A reference that falls through to a sibling project still opens — that is
+   * deliberate (a path pasted from an older conversation should work) — but
+   * the chip names the owner so the conversation never looks like it produced
+   * a file that actually lives elsewhere.
+   */
+  private foreignProjectOf(resolved: string): string {
+    if (resolved.length === 0) {
+      return ''
+    }
+    const current = this.workspaceOf(this.currentProjectId)
+    if (current.length > 0 && (resolved === current || resolved.startsWith(`${current}/`))) {
+      return ''
+    }
+    for (const project of this.projects) {
+      const root = this.workspaceOf(project.id)
+      if (root.length > 0 && (resolved === root || resolved.startsWith(`${root}/`))) {
+        return project.name
+      }
+    }
+    // Runtime state (session logs, snapshots) is not an artifact of any project.
+    if (this.context !== null) {
+      const runtime = `${this.context.filesDir}/dsh-home`
+      if (resolved === runtime || resolved.startsWith(`${runtime}/`)) {
+        return ''
+      }
+    }
+    // A bound external directory, or the sandbox root itself.
+    return '其他目录'
+  }
+
   private resolveFile(ref: FileRef): string {
     const candidates = this.candidatePaths(ref.path)
     for (const path of candidates) {
@@ -1253,7 +1472,15 @@ struct Index {
     return candidates.length > 0 ? candidates[0] : ''
   }
 
-  /** Absolute paths pass through; relative ones fan out over every known root. */
+  /**
+   * Absolute paths pass through; relative ones fan out over known roots.
+   *
+   * The current project's workspace comes first and is the only root treated
+   * as authoritative. Other projects and the sandbox root stay as a last
+   * resort so a reference pasted from an older conversation still opens, but
+   * `resolveFile` reports which root won (see `resolveFileIn`), because a hit
+   * outside the open project is not the same file the user meant.
+   */
   private candidatePaths(raw: string): string[] {
     const out: string[] = []
     if (this.context === null) {
@@ -1645,6 +1872,7 @@ struct Index {
                 onStop: () => this.stopAcp(),
                 onOpenFile: (ref: FileRef) => this.openFile(ref),
                 onResolveFile: (ref: FileRef) => this.resolveFile(ref),
+                onForeignProject: (resolved: string) => this.foreignProjectOf(resolved),
                 onShareTextConsumed: () => {
                   this.shareText = ''
                 },
@@ -1653,6 +1881,12 @@ struct Index {
                 },
                 onPickImage: () => {
                   void this.pickImage()
+                },
+                onRollback: (messageId: string) => {
+                  void this.rollbackTurn(messageId)
+                },
+                onFork: (messageId: string) => {
+                  void this.forkFrom(messageId)
                 }
               })
                 .layoutWeight(1)
@@ -1703,6 +1937,7 @@ struct Index {
                 onStop: () => this.stopAcp(),
                 onOpenFile: (ref: FileRef) => this.openFile(ref),
                 onResolveFile: (ref: FileRef) => this.resolveFile(ref),
+                onForeignProject: (resolved: string) => this.foreignProjectOf(resolved),
                 onShareTextConsumed: () => {
                   this.shareText = ''
                 },
@@ -1711,6 +1946,12 @@ struct Index {
                 },
                 onPickImage: () => {
                   void this.pickImage()
+                },
+                onRollback: (messageId: string) => {
+                  void this.rollbackTurn(messageId)
+                },
+                onFork: (messageId: string) => {
+                  void this.forkFrom(messageId)
                 }
               })
               .bindSheet($$this.showFiles, this.filesSheet(), {
