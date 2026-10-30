@@ -1469,7 +1469,10 @@ struct Index {
         // Not under this root; keep probing.
       }
     }
-    return candidates.length > 0 ? candidates[0] : ''
+    // Nothing resolved: return '' rather than the first candidate. Handing back
+    // a path we know is absent made the viewer blame the file instead of the
+    // lookup, which is the "文件不存在" that showed for files that do exist.
+    return ''
   }
 
   /**
@@ -1524,6 +1527,11 @@ struct Index {
   private openFile(ref: FileRef): void {
     const path = this.resolveFile(ref)
     if (path.length === 0) {
+      // Say why nothing opened. A silent no-op reads as a broken button.
+      this.getUIContext().getPromptAction().showToast({
+        message: `找不到「${ref.name}」：它不在当前项目的可访问目录内。`,
+        duration: 2600
+      })
       return
     }
     this.viewerPath = path

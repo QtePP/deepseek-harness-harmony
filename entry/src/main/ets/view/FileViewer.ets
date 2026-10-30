@@ -77,8 +77,15 @@ export struct FileViewer {
     this.text = ''
     this.truncated = false
     try {
+      if (this.filePath.length === 0) {
+        this.failed = '没有可打开的文件路径。'
+        return
+      }
       if (!fs.accessSync(this.filePath)) {
-        this.failed = '文件不存在，可能已被清理或位于其他目录。'
+        // Name the actual path: the usual cause is an external directory whose
+        // grant lapsed, not a deleted file, and the user cannot tell those
+        // apart from a vague message.
+        this.failed = `找不到该文件：${this.filePath}\n外部目录的访问授权可能已失效，重新绑定项目目录后可恢复。`
         return
       }
       this.kind = kindOf(this.filePath)

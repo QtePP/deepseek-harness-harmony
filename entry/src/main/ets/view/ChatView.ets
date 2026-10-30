@@ -367,7 +367,41 @@ export struct ArtifactDock {
     if (isWebExt(item.path)) {
       return 'web'
     }
-    return this.isImage(item.path) ? 'image' : 'other'
+    if (this.isImage(item.path)) {
+      return 'image'
+    }
+    // Plain text renders inline too: bouncing every .txt/.md/.json to the
+    // full-screen cover made a working preview look unavailable.
+    return this.isText(item.path) ? 'text' : 'other'
+  }
+
+  /** Extensions whose bytes are safe to show as text in the dock pane. */
+  private isText(path: string): boolean {
+    const name = path.substring(path.lastIndexOf('/') + 1)
+    const dot = name.lastIndexOf('.')
+    if (dot <= 0) {
+      return false
+    }
+    const ext = name.substring(dot + 1).toLowerCase()
+    return ext === 'txt' || ext === 'md' || ext === 'json' || ext === 'csv'
+      || ext === 'log' || ext === 'yml' || ext === 'yaml' || ext === 'ts'
+      || ext === 'js' || ext === 'ets' || ext === 'cjs' || ext === 'mjs'
+  }
+
+  /**
+   * Text of the expanded artifact, read once per expansion. Capped so a huge
+   * log cannot stall the pane; the full file is still one tap away.
+   */
+  private previewText(): string {
+    const item = this.current()
+    if (item === null || item.resolved.length === 0) {
+      return ''
+    }
+    try {
+      return fs.readTextSync(item.resolved, { length: 32768 })
+    } catch (error) {
+      return `无法读取：${(error as Error).message}`
+    }
   }
 
   private expandedSrc(): string {
@@ -553,6 +587,23 @@ export struct ArtifactDock {
                 .height(320)
                 .borderRadius(12)
                 .backgroundColor($r('app.color.surface'))
+              } else if (this.expandedKind() === 'text') {
+                Scroll() {
+                  Text(this.previewText())
+                    .fontSize(12)
+                    .lineHeight(18)
+                    .fontFamily('monospace')
+                    .fontColor($r('app.color.text_primary'))
+                    .wordBreak(WordBreak.BREAK_ALL)
+                    .width('100%')
+                }
+                .width('100%')
+                .height(320)
+                .scrollBar(BarState.Auto)
+                .align(Alignment.TopStart)
+                .padding(12)
+                .borderRadius(12)
+                .backgroundColor($r('app.color.code_background'))
               } else {
                 Text('该类型请在「全屏」中查看。')
                   .fontSize(11)
@@ -2144,7 +2195,14 @@ export struct ChatView {
         ArtifactDock({
           items: this.artifacts,
           onOpenFull: (item: ArtifactItem) => {
-            const ref: FileRef = { path: item.path, name: item.name }
+            // Hand over the path already resolved when the chip was built.
+            // Re-resolving `item.path` (a raw, possibly relative reference)
+            // could land on a different candidate root and report a file that
+            // plainly exists as missing.
+            const ref: FileRef = {
+              path: item.resolved.length > 0 ? item.resolved : item.path,
+              name: item.name
+            }
             this.onOpenFile(ref)
           }
         })
