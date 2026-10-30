@@ -800,7 +800,7 @@ struct TraceEntryRow {
 export struct MessageItem {
   @ObjectLink message: ChatMessage
   /** True only while this message is the live turn the runtime is working on. */
-  @Prop running: boolean = false
+  @Prop @Watch('onRunningChanged') running: boolean = false
   /** Tool calls render collapsed by default; tapping the row expands the full payload. */
   @State toolExpanded: boolean = false
   /** Thinking renders collapsed by default; it is long and secondary. */
@@ -814,6 +814,9 @@ export struct MessageItem {
   /** Measured content height; @State so the viewport re-hugs as the run grows. */
   @State timelineContentHeight: number = 0
   private timelineViewportHeight: number = 0
+  /** Pulse phase for the live bolt in the trace chip; advances while running. */
+  @State boltPhase: number = 0
+  private boltTimer: number = -1
   onOpenFile: (ref: FileRef) => void = () => {}
   onResolveFile: (ref: FileRef) => string = () => ''
   /** Owning project name when the path is outside the open workspace; '' if local. */
@@ -822,6 +825,39 @@ export struct MessageItem {
   onRollback: (messageId: string) => void = () => {}
   onFork: (messageId: string) => void = () => {}
   private previewController: webview.WebviewController = new webview.WebviewController()
+
+  aboutToAppear(): void {
+    this.syncBoltTimer()
+  }
+
+  /** A row stops being live when the turn settles; stop paying for its timer. */
+  onRunningChanged(): void {
+    this.syncBoltTimer()
+  }
+
+  aboutToDisappear(): void {
+    if (this.boltTimer >= 0) {
+      clearInterval(this.boltTimer)
+      this.boltTimer = -1
+    }
+  }
+
+  /**
+   * Drive the trace chip's bolt only while this row is the live turn. The
+   * timer is created and torn down with `running`, so a settled row costs
+   * nothing and no interval outlives the component.
+   */
+  private syncBoltTimer(): void {
+    if (this.running && this.boltTimer < 0) {
+      this.boltTimer = setInterval(() => {
+        this.boltPhase = (this.boltPhase + 1) % 3
+      }, 320)
+    } else if (!this.running && this.boltTimer >= 0) {
+      clearInterval(this.boltTimer)
+      this.boltTimer = -1
+      this.boltPhase = 0
+    }
+  }
 
   /** Memoized on the message text: streaming re-renders rescan once per chunk. */
   private refsCache: FileRef[] = []
@@ -1163,10 +1199,17 @@ export struct MessageItem {
         .flexShrink(1)
 
         if (this.running) {
-          LoadingProgress()
+          // Live turn: the brand bolt beats instead of a generic spinner.
+          Image($r('app.media.logo'))
             .width(14)
             .height(14)
-            .color($r('app.color.brand'))
+            .objectFit(ImageFit.Contain)
+            .opacity(this.boltPhase === 0 ? 1 : 0.45)
+            .scale({
+              x: this.boltPhase === 0 ? 1.14 : 0.94,
+              y: this.boltPhase === 0 ? 1.14 : 0.94
+            })
+            .animation({ duration: 280, curve: Curve.EaseInOut })
         }
 
         Text(`${this.thinkParts().length} 步`)
@@ -1699,12 +1742,26 @@ export struct ChatView {
 
   /** One dot of the typing indicator; the active dot lifts and darkens. */
   @Builder
-  typingDotAt(index: number) {
-    Circle({ width: 6, height: 6 })
-      .fill(this.typingDot === index ? $r('app.color.brand') : $r('app.color.text_tertiary'))
-      .opacity(this.typingDot === index ? 1 : 0.45)
-      .translate({ y: this.typingDot === index ? -2 : 0 })
-      .animation({ duration: 240, curve: Curve.EaseOut })
+  /**
+   * The brand bolt, pulsing while the runtime works.
+   *
+   * Every third tick is a full-strength flash; the two ticks between it hold a
+   * dimmed, slightly smaller mark. That gives the loop a beat (flash, settle,
+   * settle) instead of a uniform fade, and the mark itself carries "this app is
+   * thinking" — which a generic spinner cannot.
+   */
+  @Builder
+  boltPulse() {
+    Image($r('app.media.logo'))
+      .width(18)
+      .height(18)
+      .objectFit(ImageFit.Contain)
+      .opacity(this.typingDot === 0 ? 1 : 0.45)
+      .scale({
+        x: this.typingDot === 0 ? 1.14 : 0.94,
+        y: this.typingDot === 0 ? 1.14 : 0.94
+      })
+      .animation({ duration: 280, curve: Curve.EaseInOut })
   }
 
   /** A finished turn is when the produced files actually exist. */
@@ -2044,14 +2101,7 @@ export struct ChatView {
 
         if (this.running) {
           Row({ space: 8 }) {
-            Row({ space: 3 }) {
-              this.typingDotAt(0)
-              this.typingDotAt(1)
-              this.typingDotAt(2)
-            }
-            .width(24)
-            .height(14)
-            .alignItems(VerticalAlign.Center)
+            this.boltPulse()
 
             Text('正在执行…').fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
             if (this.canStop) {
