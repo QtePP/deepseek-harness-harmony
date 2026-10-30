@@ -32,6 +32,8 @@ const BAR_MAX_WIDTH: number = 120
 
 /** The timeline grows with its content and scrolls only past this height. */
 const TIMELINE_MAX_HEIGHT: number = 280
+/** First-frame height before the content has measured itself. */
+const TIMELINE_SEED_HEIGHT: number = 56
 
 function isPreviewExt(ext: string): boolean {
   for (const item of PREVIEW_EXTS) {
@@ -1112,7 +1114,10 @@ export struct MessageItem {
    */
   private timelineHeight(): number {
     if (this.timelineContentHeight <= 0) {
-      return TIMELINE_MAX_HEIGHT
+      // Not measured yet. A small seed rather than the cap: opening at 280 and
+      // snapping down to the real height is what made the panel appear to jump
+      // as it arrived. The content measures itself on the next layout pass.
+      return TIMELINE_SEED_HEIGHT
     }
     return Math.min(TIMELINE_MAX_HEIGHT, Math.ceil(this.timelineContentHeight))
   }
@@ -1265,7 +1270,10 @@ export struct MessageItem {
       })
 
       if (this.reasoningExpanded) {
-        Stack({ alignContent: Alignment.BottomStart }) {
+        // TopStart, not BottomStart: when the run is shorter than the viewport
+        // a bottom-aligned stack sank the content away from the chip it belongs
+        // to, which is the "opens in the wrong place" half of the bug.
+        Stack({ alignContent: Alignment.TopStart }) {
           Stack({ alignContent: Alignment.TopStart }) {
             Scroll() {
               Stack({ alignContent: Alignment.TopStart }) {
@@ -1298,6 +1306,9 @@ export struct MessageItem {
             }
             .width('100%')
             .height(this.timelineHeight())
+            // Smooth the seed-to-measured step so the panel grows into place
+            // instead of snapping to its height on the second frame.
+            .animation({ duration: 180, curve: Curve.EaseOut })
             .scrollBar(BarState.Off)
             .edgeEffect(EdgeEffect.Spring)
             .onAreaChange((oldArea: Area, newArea: Area) => {
@@ -1345,8 +1356,10 @@ export struct MessageItem {
         .backgroundColor($r('app.color.background'))
         .borderRadius(12)
         .clip(true)
+        // Slides up from below: the panel sits under the chip, so a -y offset
+        // had it arriving from above and crossing the chip on the way in.
         .transition(TransitionEffect.OPACITY
-          .combine(TransitionEffect.translate({ y: -8 }))
+          .combine(TransitionEffect.translate({ y: 10 }))
           .animation({ duration: 220, curve: Curve.EaseOut }))
       }
     }
