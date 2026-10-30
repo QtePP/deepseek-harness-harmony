@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 影子本身带垂直渐变：上方浓、下方彻底淡出 -->
+    <linearGradient id="shade" gradientUnits="userSpaceOnUse" x1="12" y1="4.5" x2="12" y2="22">
+      <stop offset="0" stop-color="#000" stop-opacity=".85"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </linearGradient>
+    <!-- far：大范围柔化，决定影子形体与纵深 -->
+    <filter id="far" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.8"/>
+    </filter>
+    <!-- near：贴合边缘，撑住接触面 -->
+    <filter id="near" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation=".55"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#far)" transform="translate(0.4 1.6)">
+    <path d="M4.5 4.5h15" stroke="url(#shade)" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M12.5 5.5 L9.2 13.2 L12 13.2 L9.8 20.5 L15.8 11.8 L12.6 11.8 L14.2 5.5 Z" fill="url(#shade)"/>
+  </g>
+  <g filter="url(#near)" transform="translate(0.4 0.9)">
+    <path d="M4.5 4.5h15" stroke="url(#shade)" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M12.5 5.5 L9.2 13.2 L12 13.2 L9.8 20.5 L15.8 11.8 L12.6 11.8 L14.2 5.5 Z" fill="url(#shade)"/>
+  </g>
+
+  <path d="M4.5 4.5h15" stroke="#1a1a1a" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M12.5 5.5 L9.2 13.2 L12 13.2 L9.8 20.5 L15.8 11.8 L12.6 11.8 L14.2 5.5 Z" fill="#1a1a1a"/>
+</svg>

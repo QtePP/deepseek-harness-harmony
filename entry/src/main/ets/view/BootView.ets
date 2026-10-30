@@ -64,7 +64,7 @@ export struct BootView {
 
   build() {
     Column({ space: 16 }) {
-      Image($r('app.media.app_logo'))
+      Image($r('app.media.logo'))
         .width(96)
         .height(96)
         .scale({ x: this.logoScale, y: this.logoScale })

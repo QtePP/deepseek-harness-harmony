@@ -1963,10 +1963,10 @@ export struct ChatView {
               // Brand mark above the greeting: the empty state is the first
               // thing a new session shows, so it carries the product identity
               // rather than a generic status dot.
-              Image($r('app.media.app_logo'))
+              // Vector mark: transparent, so no rounded plate to clip it to.
+              Image($r('app.media.logo'))
                 .width(64)
                 .height(64)
-                .borderRadius(16)
                 .objectFit(ImageFit.Contain)
 
               Text('TA Harness')
