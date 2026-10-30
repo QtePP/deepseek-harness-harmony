@@ -859,6 +859,23 @@ export struct MessageItem {
     }
   }
 
+  /**
+   * Colour sweep for the live bolt in the trace chip.
+   *
+   * Deliberately not the composer's gesture: that one pulses by scale, this one
+   * walks a three-step hue ramp (brand blue → soft indigo → deep slate) so the
+   * two indicators never read as the same animation running twice.
+   */
+  private boltTint(): ResourceColor {
+    if (this.boltPhase === 0) {
+      return $r('app.color.brand')
+    }
+    if (this.boltPhase === 1) {
+      return '#7C8CF8'
+    }
+    return $r('app.color.text_tertiary')
+  }
+
   /** Memoized on the message text: streaming re-renders rescan once per chunk. */
   private refsCache: FileRef[] = []
   private refsKey: string = ''
@@ -1198,35 +1215,40 @@ export struct MessageItem {
         .alignItems(VerticalAlign.Center)
         .flexShrink(1)
 
-        if (this.running) {
-          // Live turn: the brand bolt beats instead of a generic spinner.
-          Image($r('app.media.logo'))
-            .width(14)
-            .height(14)
-            .objectFit(ImageFit.Contain)
-            .opacity(this.boltPhase === 0 ? 1 : 0.45)
-            .scale({
-              x: this.boltPhase === 0 ? 1.14 : 0.94,
-              y: this.boltPhase === 0 ? 1.14 : 0.94
-            })
-            .animation({ duration: 280, curve: Curve.EaseInOut })
+        // Blank absorbs every spare pixel so the label group below is pinned to
+        // the right edge and can never ride over the bar.
+        Blank()
+
+        Row({ space: 6 }) {
+          if (this.running) {
+            // Live turn. This bolt tints rather than scales: the composer's
+            // indicator already owns the "grow and shrink" gesture, so the chip
+            // uses a colour sweep to stay distinguishable at a glance.
+            Image($r('app.media.logo'))
+              .width(13)
+              .height(13)
+              .objectFit(ImageFit.Contain)
+              .fillColor(this.boltTint())
+              .opacity(this.boltPhase === 0 ? 1 : 0.55)
+              .animation({ duration: 340, curve: Curve.EaseInOut })
+          }
+
+          Text(`${this.thinkParts().length} 步`)
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+            .flexShrink(0)
+
+          SymbolGlyph($r('sys.symbol.chevron_down'))
+            .fontSize(12)
+            .fontColor([$r('app.color.text_tertiary')])
+            .rotate({ angle: this.reasoningExpanded ? 0 : -90 })
+            .animation({ curve: curves.springMotion(0.35, 0.85) })
         }
-
-        Text(`${this.thinkParts().length} 步`)
-          .fontSize(11)
-          .fontColor($r('app.color.text_tertiary'))
-          // The counter and chevron must keep their intrinsic width: without
-          // this the activity bar (up to BAR_MAX_WIDTH) plus a long step count
-          // overflowed the chip and the two texts drew on top of each other.
-          .flexShrink(0)
-
-        SymbolGlyph($r('sys.symbol.chevron_down'))
-          .fontSize(12)
-          .fontColor([$r('app.color.text_tertiary')])
-          .rotate({ angle: this.reasoningExpanded ? 0 : -90 })
-          .animation({ curve: curves.springMotion(0.35, 0.85) })
+        .alignItems(VerticalAlign.Center)
+        .flexShrink(0)
       }
       .alignItems(VerticalAlign.Center)
+      .width('100%')
       .constraintSize({ minWidth: 132, maxWidth: '100%' })
       .padding({ left: 12, right: 12, top: 10, bottom: 10 })
       .backgroundColor($r('app.color.surface_muted'))
