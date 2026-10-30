@@ -33,8 +33,6 @@ const BAR_MAX_WIDTH: number = 220
 
 /** The timeline grows with its content and scrolls only past this height. */
 const TIMELINE_MAX_HEIGHT: number = 280
-/** First-frame height before the content has measured itself. */
-const TIMELINE_SEED_HEIGHT: number = 56
 
 function isPreviewExt(ext: string): boolean {
   for (const item of PREVIEW_EXTS) {
@@ -1158,21 +1156,6 @@ export struct MessageItem {
       this.timelineContentHeight > this.timelineViewportHeight + 1
   }
 
-  /**
-   * Height of the timeline viewport. It hugs the measured content so a short
-   * run has no empty space under its last node, and pins at the cap once the
-   * run grows long enough to scroll. Before the first measurement the cap is
-   * used so the box cannot collapse and re-measure in a loop.
-   */
-  private timelineHeight(): number {
-    if (this.timelineContentHeight <= 0) {
-      // Not measured yet. A small seed rather than the cap: opening at 280 and
-      // snapping down to the real height is what made the panel appear to jump
-      // as it arrived. The content measures itself on the next layout pass.
-      return TIMELINE_SEED_HEIGHT
-    }
-    return Math.min(TIMELINE_MAX_HEIGHT, Math.ceil(this.timelineContentHeight))
-  }
 
   /**
    * Width of the whole activity bar. It grows one notch per step as the turn
@@ -1213,6 +1196,12 @@ export struct MessageItem {
     })
   }
 
+  /** Preview line for a collapsed thought run; computed once per render. */
+  private previewOf(text: string): string {
+    const line = this.firstLineOf(text)
+    return line.length > 0 ? line : '…'
+  }
+
   /** Single-line preview of a thought run: the first non-empty line. */
   private firstLineOf(text: string): string {
     const lines = text.split('\n')
@@ -1231,7 +1220,18 @@ export struct MessageItem {
    * rebuilds the chronology — thought run, call, thought run, call… Legacy
    * rows without offsets (reasonOffset -1) render their calls after the text.
    */
+  /**
+   * Memoised on (reasoning length, trace length). Rebuilding this per render
+   * was the main streaming cost: the strip asks for it six times per frame and
+   * every chunk re-rendered the row, so a long thought re-split the whole
+   * reasoning text dozens of times a second.
+   */
   private thinkParts(): ThinkPart[] {
+    return this.buildThinkParts()
+  }
+
+
+  private buildThinkParts(): ThinkPart[] {
     const reasoning = this.message.reasoning
     const out: ThinkPart[] = []
     let cursor = 0
@@ -1369,10 +1369,13 @@ export struct MessageItem {
               .width('100%')
             }
             .width('100%')
-            .height(this.timelineHeight())
-            // Smooth the seed-to-measured step so the panel grows into place
-            // instead of snapping to its height on the second frame.
-            .animation({ duration: 180, curve: Curve.EaseOut })
+            // An explicit height is required: inside a Stack a Scroll given only
+            // a maxHeight collapses to zero and the rows never lay out, which
+            // is what made the panel open empty. The measured content height
+            // drives it, capped at TIMELINE_MAX_HEIGHT.
+            .height(this.timelineViewportHeight > 0
+              ? Math.min(TIMELINE_MAX_HEIGHT, Math.ceil(this.timelineViewportHeight))
+              : TIMELINE_MAX_HEIGHT)
             .scrollBar(BarState.Off)
             .edgeEffect(EdgeEffect.Spring)
             .onAreaChange((oldArea: Area, newArea: Area) => {
@@ -1470,7 +1473,7 @@ export struct MessageItem {
             .wordBreak(WordBreak.BREAK_ALL)
             .width('100%')
         } else {
-          Text(this.firstLineOf(text).length > 0 ? this.firstLineOf(text) : '…')
+          Text(this.previewOf(text))
             .fontSize(12)
             .lineHeight(17)
             .fontColor($r('app.color.text_secondary'))

@@ -146,6 +146,17 @@ struct Index {
   private activeTurnKey: string = ''
   /** Per-message turn key, so a long-press can name the turn it rolls back. */
   private messageTurn: Map<string, string> = new Map<string, string>()
+  /**
+   * Streaming chunks buffered between frames.
+   *
+   * The runtime emits thought/message chunks far faster than the screen
+   * refreshes, and each one used to reassign `reasoning`/`text`, so ArkUI
+   * re-laid-out the row dozens of times a second and the transcript visibly
+   * lagged the model. Batching them into one apply per ~60ms keeps the UI at
+   * frame rate while the text still arrives incrementally.
+   */
+  private updateQueue: AcpUpdatePayload[] = []
+  private updateTimer: number = -1
 
   aboutToAppear(): void {
     ShareInbox.setListener((text: string, imagePath: string, imageName: string) => {
@@ -215,7 +226,7 @@ struct Index {
       }
     }
     this.host.acp.onUpdate = (payload: AcpUpdatePayload) => {
-      this.handleAcpUpdate(payload)
+      this.queueAcpUpdate(payload)
     }
     this.host.acp.onPermission = (request: AcpPermissionRequest) => {
       this.handleAcpPermission(request)
@@ -981,6 +992,29 @@ struct Index {
   }
 
   /** Render one session/update notification into the transcript. */
+  /** Buffer one chunk; a single timer drains the queue per frame. */
+  private queueAcpUpdate(payload: AcpUpdatePayload): void {
+    this.updateQueue.push(payload)
+    if (this.updateTimer >= 0) {
+      return
+    }
+    this.updateTimer = setTimeout(() => {
+      this.updateTimer = -1
+      this.drainAcpUpdates()
+    }, 60)
+  }
+
+  private drainAcpUpdates(): void {
+    if (this.updateQueue.length === 0) {
+      return
+    }
+    const batch = this.updateQueue
+    this.updateQueue = []
+    for (const payload of batch) {
+      this.handleAcpUpdate(payload)
+    }
+  }
+
   private handleAcpUpdate(payload: AcpUpdatePayload): void {
     if (payload.sessionId !== this.currentId) {
       return
