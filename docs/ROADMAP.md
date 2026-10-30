@@ -8,7 +8,7 @@
 
 | 项 | 实测值 |
 |---|---|
-| 设备 | `9CY0226920012881`（HarmonyOS 7 / API 26） |
+| 设备 | 真机（HarmonyOS 7 / API 26，序列号不入库） |
 | 应用 | `com.example.dshharmony`，已签名安装并运行 |
 | 后端 | `node v24.2.0` / `platform: openharmony` / `arch: arm64` / `wasm: false`（jitless） |
 | 桥 | `127.0.0.1:4517`，`state: running`，`error: null` |
