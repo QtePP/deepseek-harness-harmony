@@ -1224,7 +1224,9 @@ export struct MessageItem {
             // Live turn. This bolt tints rather than scales: the composer's
             // indicator already owns the "grow and shrink" gesture, so the chip
             // uses a colour sweep to stay distinguishable at a glance.
-            Image($r('app.media.logo'))
+            // Flat single-colour mark: fillColor only recolours a one-tone
+            // icon, and logo.svg carries layered shadows for the hero surfaces.
+            Image($r('app.media.bolt'))
               .width(13)
               .height(13)
               .objectFit(ImageFit.Contain)
