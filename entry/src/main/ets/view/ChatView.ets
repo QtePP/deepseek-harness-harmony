@@ -28,7 +28,8 @@ const PREVIEW_EXTS: string[] = [
 /** Activity bar geometry: grows per step, pins at BAR_MAX_WIDTH. */
 const BAR_SEGMENT_WIDTH: number = 10
 const BAR_SEGMENT_GAP: number = 3
-const BAR_MAX_WIDTH: number = 120
+/** Widest the bar may get before it starts scrolling instead of growing. */
+const BAR_MAX_WIDTH: number = 220
 
 /** The timeline grows with its content and scrolls only past this height. */
 const TIMELINE_MAX_HEIGHT: number = 280
@@ -1127,13 +1128,20 @@ export struct MessageItem {
    * unfolds, then pins at a fixed cap so a long run stays a compact strip
    * instead of pushing the label off the row.
    */
-  private barWidth(): number {
+  /** Natural width of the bar; may exceed BAR_MAX_WIDTH — the scroll clamps it. */
+  private naturalBarWidth(): number {
     const count = this.thinkParts().length
     if (count <= 0) {
       return 0
     }
-    return Math.min(BAR_MAX_WIDTH, count * BAR_SEGMENT_WIDTH + (count - 1) * BAR_SEGMENT_GAP)
+    return count * BAR_SEGMENT_WIDTH + (count - 1) * BAR_SEGMENT_GAP
   }
+
+  /** Visible width: grows with the run, then pins so the strip can be dragged. */
+  private barWidth(): number {
+    return Math.min(BAR_MAX_WIDTH, this.naturalBarWidth())
+  }
+
 
   /**
    * Width of a single segment. While the bar is still growing every segment is
@@ -1141,15 +1149,17 @@ export struct MessageItem {
    * so the bar reads as a full bar rather than a stub that stops early.
    */
   private segmentWidth(): number {
-    const count = this.thinkParts().length
-    if (count <= 0) {
-      return 0
-    }
-    const natural = count * BAR_SEGMENT_WIDTH + (count - 1) * BAR_SEGMENT_GAP
-    if (natural <= BAR_MAX_WIDTH) {
-      return BAR_SEGMENT_WIDTH
-    }
-    return Math.max(2, (BAR_MAX_WIDTH - (count - 1) * BAR_SEGMENT_GAP) / count)
+    return this.thinkParts().length <= 0 ? 0 : BAR_SEGMENT_WIDTH
+  }
+
+  /** Expand/collapse the run panel; collapsing also drops per-thought state. */
+  private toggleReasoning(): void {
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+      this.reasoningExpanded = !this.reasoningExpanded
+      if (!this.reasoningExpanded) {
+        this.expandedThoughts.clear()
+      }
+    })
   }
 
   /** Single-line preview of a thought run: the first non-empty line. */
@@ -1202,22 +1212,31 @@ export struct MessageItem {
   traceBlock() {
     Column({ space: 8 }) {
       Row({ space: 10 }) {
-        Row({ space: 3 }) {
-          ForEach(this.thinkParts(), (part: ThinkPart, index: number) => {
-            Column()
-              .height(14)
-              .width(this.segmentWidth())
-              .borderRadius(2)
-              .backgroundColor(this.segmentColor(part))
-          }, (part: ThinkPart, index: number) =>
-            `${index}.${part.kind}.${part.text.length}.${part.entry === null ? '' : part.entry.status}.${this.message.note}`)
+        // The bar grows with the run, then pins at BAR_MAX_WIDTH and scrolls
+        // sideways instead of squeezing its segments into slivers.
+        Scroll() {
+          Row({ space: BAR_SEGMENT_GAP }) {
+            ForEach(this.thinkParts(), (part: ThinkPart, index: number) => {
+              Column()
+                .height(14)
+                .width(this.segmentWidth())
+                .borderRadius(2)
+                .backgroundColor(this.segmentColor(part))
+            }, (part: ThinkPart, index: number) =>
+              `${index}.${part.kind}.${part.text.length}.${part.entry === null ? '' : part.entry.status}.${this.message.note}`)
+          }
+          // Natural width, not '100%': a compressed row gives the Scroll
+          // nothing to travel over, which is why dragging did nothing.
+          .width(this.naturalBarWidth())
+          .height(14)
+          .alignItems(VerticalAlign.Center)
         }
-        // The bar is decorative: it yields space before the step count or the
-        // chevron do. Without a capped width the row overflowed its chip and
-        // the counter drew on top of the bar.
         .width(this.barWidth())
         .height(14)
-        .alignItems(VerticalAlign.Center)
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
+        .align(Alignment.Start)
         .flexShrink(1)
 
         // Blank absorbs every spare pixel so the label group below is pinned to
@@ -1253,21 +1272,15 @@ export struct MessageItem {
         }
         .alignItems(VerticalAlign.Center)
         .flexShrink(0)
+        // The toggle lives on the label, not the whole row: a row-wide tap
+        // swallowed the horizontal drag the bar needs once it starts scrolling.
+        .onClick(() => this.toggleReasoning())
       }
       .alignItems(VerticalAlign.Center)
       .width('100%')
-      .constraintSize({ minWidth: 132, maxWidth: '100%' })
-      .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-      .backgroundColor($r('app.color.surface_muted'))
-      .borderRadius(12)
-      .onClick(() => {
-        this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
-          this.reasoningExpanded = !this.reasoningExpanded
-          if (!this.reasoningExpanded) {
-            this.expandedThoughts.clear()
-          }
-        })
-      })
+      // No plate: the bar and the label sit directly on the transcript, which
+      // reads as one line of metadata instead of a floating control.
+      .padding({ right: 2, top: 4, bottom: 4 })
 
       if (this.reasoningExpanded) {
         // TopStart, not BottomStart: when the run is shorter than the viewport
