@@ -4,7 +4,7 @@ import { BootPhase } from '../host/NodeHost'
 /** Splash / failure surface shown until the runtime answers. */
 @Component
 export struct BootView {
-  @Prop phase: BootPhase = BootPhase.IDLE
+  @Prop @Watch('onPhaseChanged') phase: BootPhase = BootPhase.IDLE
   @Prop detail: string = ''
   @Prop diagnostics: string = ''
   /** Breathing opacity of the "Powered by" tagline below the name. */
@@ -15,6 +15,9 @@ export struct BootView {
   @State titleOpacity: number = 0
   @State titleRise: number = 16
   @State tagIntro: number = 0
+  /** Orb pulse while the runtime is being reached: 0 = bright, 1 = dim. */
+  @State orbPhase: number = 0
+  private orbTimer: number = -1
   onRetry: () => void = () => {}
   onShowDiagnostics: () => void = () => {}
 
@@ -39,6 +42,33 @@ export struct BootView {
     }, () => {
       this.tagOpacity = 0.35
     })
+    this.syncOrb()
+  }
+
+  aboutToDisappear(): void {
+    if (this.orbTimer >= 0) {
+      clearInterval(this.orbTimer)
+      this.orbTimer = -1
+    }
+  }
+
+  /** Terminal phases stop the pulse; a retry restarts it. */
+  onPhaseChanged(): void {
+    this.syncOrb()
+  }
+
+  /** Pulse the orb only while a non-terminal phase is on screen. */
+  private syncOrb(): void {
+    const active = !this.isFailure() && this.phase !== BootPhase.READY
+    if (active && this.orbTimer < 0) {
+      this.orbTimer = setInterval(() => {
+        this.orbPhase = this.orbPhase === 0 ? 1 : 0
+      }, 620)
+    } else if (!active && this.orbTimer >= 0) {
+      clearInterval(this.orbTimer)
+      this.orbTimer = -1
+      this.orbPhase = 0
+    }
   }
 
   private isFailure(): boolean {
@@ -111,11 +141,32 @@ export struct BootView {
         }
         .margin({ top: 8 })
       } else {
-        LoadingProgress()
-          .width(48)
-          .height(48)
-          .color($r('app.color.brand'))
-          .margin({ top: 24 })
+        // The brand bolt inside a soft orb, pulsing while the runtime is
+        // reached. A spinner says "wait"; this says "the app is starting", and
+        // it keeps the splash consistent with the in-app thinking indicator.
+        Stack() {
+          Circle()
+            .width(56)
+            .height(56)
+            .fill($r('app.color.surface_muted'))
+            .opacity(this.orbPhase === 0 ? 1 : 0.55)
+            .animation({ duration: 620, curve: Curve.EaseInOut })
+
+          Image($r('app.media.bolt'))
+            .width(24)
+            .height(24)
+            .objectFit(ImageFit.Contain)
+            .fillColor($r('app.color.brand'))
+            .opacity(this.orbPhase === 0 ? 1 : 0.7)
+            .scale({
+              x: this.orbPhase === 0 ? 1 : 0.92,
+              y: this.orbPhase === 0 ? 1 : 0.92
+            })
+            .animation({ duration: 620, curve: Curve.EaseInOut })
+        }
+        .width(56)
+        .height(56)
+        .margin({ top: 24 })
 
         Text(this.label())
           .fontSize(16)
