@@ -85,7 +85,28 @@ function pathsInToolInput(input: string): string[] {
       out.push(flat)
     }
   }
-  return out
+  return out.filter((path: string) => looksLikeFilePath(path))
+}
+
+/**
+ * Whether a tool argument could name a file. Rejects the shapes that arrive as
+ * whole arguments but are not paths — `{}` for a no-arg call, `*` for a glob
+ * pattern — so they never reach the dock as phantom artifacts.
+ */
+function looksLikeFilePath(value: string): boolean {
+  if (value.length < 2 || value.indexOf('\n') >= 0) {
+    return false
+  }
+  // Glob metacharacters mean a pattern, not a file the turn produced.
+  if (value.indexOf('*') >= 0 || value.indexOf('?') >= 0 || value.indexOf('{') >= 0
+    || value.indexOf('[') >= 0) {
+    return false
+  }
+  // Needs a separator or an extension; bare tokens are patterns, not files.
+  const hasSlash = value.indexOf('/') >= 0
+  const dot = value.lastIndexOf('.')
+  const hasExt = dot > value.lastIndexOf('/') + 1 && dot < value.length - 1
+  return hasSlash || hasExt
 }
 
 /**
@@ -356,6 +377,14 @@ export struct ArtifactDock {
       this.expandedPath = ''
       return
     }
+    // Explain a dead chip instead of opening an empty frame that looks broken.
+    if (!item.exists) {
+      const message = item.resolved.length === 0
+        ? '该目录当前未挂载（外部目录授权可能已失效），重新绑定项目目录后可访问。'
+        : '该文件已不在原位置。'
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2600 })
+      return
+    }
     this.expandedPath = item.path
   }
 
@@ -373,11 +402,22 @@ export struct ArtifactDock {
    * silently presenting it as an artifact is what made "wrong directory" reads
    * look like the app losing track of files.
    */
+  /**
+   * Card subtitle. Three distinct states, because "gone" and "not reachable
+   * from here" need different user responses:
+   *   gone      — the path resolved but the file is no longer there;
+   *   unmounted — nothing resolved at all, usually a bound directory whose
+   *               grant lapsed after a restart, so the file may well exist;
+   *   foreign   — it resolved into another project's workspace.
+   */
   private cardStatus(item: ArtifactItem): string {
-    if (item.foreign.length > 0) {
-      return `来自「${item.foreign}」`
+    if (item.exists) {
+      return item.foreign.length > 0 ? `来自「${item.foreign}」` : '点击预览'
     }
-    return item.exists ? '点击预览' : '文件未找到'
+    if (item.resolved.length === 0) {
+      return '目录未挂载'
+    }
+    return '已被清理'
   }
 
   @Builder
@@ -590,16 +630,28 @@ struct TraceEntryRow {
   }
 
   /** Elapsed time between call start and settle; '' while still running. */
+  /**
+   * Elapsed time between call start and settle; '' when unknown.
+   *
+   * Both ends must be known: a row persisted before `at` existed has doneAt
+   * but no start, and subtracting 0 would print the whole epoch as a duration.
+   * Sub-second calls show one decimal, everything else rounds to whole units
+   * so a long run does not read as false precision.
+   */
   private durationLabel(): string {
-    if (this.entry.doneAt <= 0) {
+    if (this.entry.doneAt <= 0 || this.entry.at <= 0 || this.entry.doneAt < this.entry.at) {
       return ''
     }
-    const seconds = Math.max(0, this.entry.doneAt - this.entry.at) / 1000
-    if (seconds < 60) {
+    const seconds = (this.entry.doneAt - this.entry.at) / 1000
+    if (seconds < 10) {
       return `${seconds.toFixed(1)}s`
     }
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`
+    }
     const minutes = Math.floor(seconds / 60)
-    return `${minutes}m${Math.round(seconds - minutes * 60)}s`
+    const rest = Math.round(seconds - minutes * 60)
+    return rest > 0 ? `${minutes}m${rest}s` : `${minutes}m`
   }
 
   /**
@@ -1102,9 +1154,13 @@ export struct MessageItem {
           }, (part: ThinkPart, index: number) =>
             `${index}.${part.kind}.${part.text.length}.${part.entry === null ? '' : part.entry.status}.${this.message.note}`)
         }
+        // The bar is decorative: it yields space before the step count or the
+        // chevron do. Without a capped width the row overflowed its chip and
+        // the counter drew on top of the bar.
         .width(this.barWidth())
         .height(14)
         .alignItems(VerticalAlign.Center)
+        .flexShrink(1)
 
         if (this.running) {
           LoadingProgress()
@@ -1116,6 +1172,10 @@ export struct MessageItem {
         Text(`${this.thinkParts().length} 步`)
           .fontSize(11)
           .fontColor($r('app.color.text_tertiary'))
+          // The counter and chevron must keep their intrinsic width: without
+          // this the activity bar (up to BAR_MAX_WIDTH) plus a long step count
+          // overflowed the chip and the two texts drew on top of each other.
+          .flexShrink(0)
 
         SymbolGlyph($r('sys.symbol.chevron_down'))
           .fontSize(12)
@@ -1740,10 +1800,11 @@ export struct ChatView {
     } catch (error) {
       exists = false
     }
+    // A guessed name is only worth showing when it proves to be a real file.
+    // A trusted path (from a write argument) is always shown, even when it does
+    // not resolve right now: the turn really did write it, and hiding the chip
+    // is how the dock vanished entirely when a bound directory went unreachable.
     if (!trusted && !exists) {
-      return false
-    }
-    if (trusted && !exists && resolved.length === 0) {
       return false
     }
     out.push({
@@ -1898,23 +1959,40 @@ export struct ChatView {
 
         if (this.messages.length === 0) {
           Column() {
-            Column({ space: 10 }) {
-              Row({ space: 8 }) {
-                Circle({ width: 10, height: 10 }).fill($r('app.color.brand'))
-                Text('dsh 已就绪')
-                  .fontSize(18)
-                  .fontWeight(FontWeight.Medium)
-              }
+            Column({ space: 12 }) {
+              // Brand mark above the greeting: the empty state is the first
+              // thing a new session shows, so it carries the product identity
+              // rather than a generic status dot.
+              Image($r('app.media.app_logo'))
+                .width(64)
+                .height(64)
+                .borderRadius(16)
+                .objectFit(ImageFit.Contain)
+
+              Text('TA Harness')
+                .fontSize(20)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary'))
+
+              Text('随时可以开始')
+                .fontSize(12)
+                .fontColor($r('app.color.text_tertiary'))
+                .margin({ top: -4 })
+
               if (this.projectName.length > 0) {
                 Text(`当前项目：${this.projectName}`)
                   .fontSize(12)
                   .fontColor($r('app.color.text_tertiary'))
+                  .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                  .backgroundColor($r('app.color.surface_muted'))
+                  .borderRadius(10)
               }
-              Text('后端运行在本机应用进程内。\n可以让我读文件、改代码、检索网页。\n生成的网页与图片会直接在对话中展示，可点开全屏查看。')
+              Text('一切都在本机运行。\n可以让我读文件、改代码、检索网页。\n生成的网页与图片会直接在对话中展示，可点开全屏查看。')
                 .fontSize(13)
                 .lineHeight(20)
                 .textAlign(TextAlign.Center)
                 .fontColor($r('app.color.text_secondary'))
+                .margin({ top: 4 })
             }
             .alignItems(HorizontalAlign.Center)
             .padding({ left: 32, right: 32, top: 28, bottom: 28 })
@@ -1975,7 +2053,7 @@ export struct ChatView {
             .height(14)
             .alignItems(VerticalAlign.Center)
 
-            Text('dsh 正在执行…').fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+            Text('正在执行…').fontSize(12).fontColor($r('app.color.text_secondary')).layoutWeight(1)
             if (this.canStop) {
               Button('停止')
                 .fontSize(12)
@@ -2049,7 +2127,10 @@ export struct ChatView {
             TextArea({ text: this.draft })
               .width('100%')
               .fontSize(15)
-              .padding({ left: 12, right: this.showModelPicker ? 118 : 48, top: 8, bottom: 8 })
+              // Right inset covers the inner strip: model glyph (28) + gap
+              // (6) + image button (34) + trailing margin. It used to reserve
+              // 118vp for the model's text label, which no longer exists.
+              .padding({ left: 12, right: this.showModelPicker ? 86 : 48, top: 8, bottom: 8 })
               .constraintSize({ minHeight: 44, maxHeight: 132 })
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius(14)
@@ -2070,28 +2151,33 @@ export struct ChatView {
 
             Row({ space: 6 }) {
               if (this.showModelPicker) {
-                Text(this.modelLabel)
-                  .fontSize(10)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .constraintSize({ maxWidth: 72 })
-                  .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-                  .fontColor($r('app.color.text_secondary'))
-                  .backgroundColor($r('app.color.surface'))
-                  .borderRadius(12)
-                  .scale({
-                    x: this.modelPressed ? 0.94 : 1,
-                    y: this.modelPressed ? 0.94 : 1
-                  })
-                  .animation({ duration: 120, curve: Curve.EaseOut })
-                  .onTouch((event: TouchEvent) => {
-                    if (event.type === TouchType.Down) {
-                      this.modelPressed = true
-                    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-                      this.modelPressed = false
-                    }
-                  })
-                  .onClick(() => this.onPickModel())
+                // A glyph instead of the model name: the full id
+                // (DeepSeek-V4.1-Flash) never fit the chip and was truncated
+                // to an unreadable stub. The name still surfaces as the
+                // accessibility label and again in the picker itself.
+                Button({ type: ButtonType.Circle }) {
+                  Image($r('app.media.icon_model'))
+                    .width(16)
+                    .height(16)
+                    .fillColor(this.modelPressed ? $r('app.color.brand') : $r('app.color.text_secondary'))
+                }
+                .width(28)
+                .height(28)
+                .backgroundColor($r('app.color.surface'))
+                .accessibilityText(this.modelLabel.length > 0 ? `模型：${this.modelLabel}` : '切换模型')
+                .scale({
+                  x: this.modelPressed ? 0.92 : 1,
+                  y: this.modelPressed ? 0.92 : 1
+                })
+                .animation({ duration: 120, curve: Curve.EaseOut })
+                .onTouch((event: TouchEvent) => {
+                  if (event.type === TouchType.Down) {
+                    this.modelPressed = true
+                  } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+                    this.modelPressed = false
+                  }
+                })
+                .onClick(() => this.onPickModel())
               }
 
               Button({ type: ButtonType.Circle }) {

@@ -105,6 +105,9 @@ interface StoredTrace {
   output?: string
   status?: string
   reasonOffset?: number
+  /** Epoch ms the call started. Persisted so a replayed row still shows its
+   *  real duration; rows written before this field omit it. */
+  at?: number
   doneAt?: number
 }
 
@@ -222,6 +225,9 @@ export class SessionStore {
             if (entry.reasonOffset >= 0) {
               item.reasonOffset = entry.reasonOffset
             }
+            if (entry.at > 0) {
+              item.at = entry.at
+            }
             if (entry.doneAt > 0) {
               item.doneAt = entry.doneAt
             }
@@ -285,6 +291,10 @@ export class SessionStore {
             entry.output = item.output === undefined ? '' : item.output
             entry.status = item.status === undefined ? 'completed' : item.status
             entry.reasonOffset = item.reasonOffset === undefined ? -1 : item.reasonOffset
+            // Restore the start time, not the load time: the constructor stamps
+            // Date.now(), which made every replayed row's duration negative and
+            // therefore clamped to a permanent "0.0s".
+            entry.at = item.at === undefined ? 0 : item.at
             entry.doneAt = item.doneAt === undefined ? 0 : item.doneAt
             message.trace.push(entry)
           }
