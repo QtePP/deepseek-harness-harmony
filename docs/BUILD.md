@@ -112,9 +112,69 @@ devecocli signature generate  # 生成 .p12/.cer/.p7b 并写回 build-profile.js
 
 | 报错/现象 | 原因 | 处理 |
 |---|---|---|
-| bundleName 不可用 | `com.example.dshharmony` 在 AGC 全局唯一命名空间里可能已被占用 | 改 `AppScope/app.json5` 的 `bundleName` 为更独特的名字，如 `com.yourname.dshharmony` |
+| bundleName 不可用 | `com.qtepp.taharness` 在 AGC 全局唯一命名空间里可能已被占用 | 改 `AppScope/app.json5` 的 `bundleName` 为更独特的名字，如 `com.yourname.dshharmony` |
 | 未实名 / 无团队权限 | 账号状态问题 | `devecocli auth status`、`devecocli auth team` |
 | 生成成功但装不上 | profile 里没有这台设备的 UDID | 连上设备后重新 `signature generate --force` |
+
+## 5.5 发布签名（分发给他人）
+
+调试签名（`signature generate` 产出的）**绑定设备白名单**，别人装了会校验失败：
+
+```
+appProvisionType: "debug"
+debug-info.device-ids: [ ...只有你自己的几台设备... ]
+```
+
+要给任意鸿蒙设备安装，必须用 AGC 签发的**发布证书**。两者区别：
+
+| | 调试签名 | 发布签名 |
+|---|---|---|
+| 设备限制 | 仅 profile 里的 UDID（≤100 台） | **无限制** |
+| 有效期 | 90 天 | 证书 3 年 / profile 长期 |
+| 用途 | 自己开发调试 | 分发、上架 |
+
+### 一次性准备（在 AGC 完成，需本人操作）
+
+1. **注册并实名**华为开发者账号（个人 ¥99/年），
+   <https://developer.huawei.com/consumer/cn/>
+2. **创建应用**：AGC → 我的应用 → 新建，bundleName 填 `com.qtepp.taharness`
+   （必须与 `AppScope/app.json5` 完全一致；AGC 全局唯一，被占用就得换）
+3. **申请发布证书**：AGC → 证书、APP ID 和 Profile → 证书 → 新建（`.cer`）
+4. **生成密钥库**：用 DevEco Studio 的 Generate Key and CSR，得到 `.p12` + `.csr`，
+   上传 CSR 换取证书
+5. **创建发布 Profile**：AGC → Profile → 新建，类型选 **Release**，
+   关联上面证书与 bundleName，下载 `.p7b`
+
+### 本地构建
+
+```bash
+# 1. 准备发布签名配置（gitignored）
+cp build-profile.signing.json5 build-profile.release.json5
+# 编辑它，把 certpath / profile / storeFile 换成发布材料，name 保持 default
+
+# 2. 构建（脚本会先校验 profile 里的 bundleName 是否匹配）
+bash scripts/build-release.sh
+```
+
+产物：`entry/build/default/outputs/default/entry-default-signed.hap`
+
+脚本做的事：校验 bundleName 一致性 → 注入发布签名 → `--build-mode release` 构建 →
+`trap` 兜底还原无签名状态。
+
+### 常见失败
+
+| 报错 | 原因 | 处理 |
+|---|---|---|
+| `00303074 Configuration Error`<br>`bundleName ... does not match ... SigningConfigs` | 签名 profile 的 bundleName 与 `app.json5` 不一致 | 在 AGC 用新 bundleName 重新生成 profile |
+| 装上了但打不开 | 接收设备系统版本低于 `compatibleSdkVersion` | 当前要求 **API 26 / HarmonyOS 7.0.0** |
+| AGC 提示 bundleName 已占用 | `com.*` 命名空间全局唯一 | 换更独特的反写域名 |
+
+### 分发前还要想清楚
+
+- **体积 335MB**：含 225MB dsh 载荷，首次启动解包 60–90 秒
+- **API 26 门槛**：HarmonyOS 6.x 及更早装不上，当前装机量有限
+- **接收方需自备 API Key**：密钥不能随包分发
+- **上架需审核**：本脚本只产出可安装的包，上架 AppGallery 另需在 AGC 提交
 
 ## 6. 构建与安装（devecocli）
 

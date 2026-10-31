@@ -9,7 +9,7 @@
 | 项 | 实测值 |
 |---|---|
 | 设备 | 真机（HarmonyOS 7 / API 26，序列号不入库） |
-| 应用 | `com.example.dshharmony`，已签名安装并运行 |
+| 应用 | `com.qtepp.taharness`，已签名安装并运行 |
 | 后端 | `node v24.2.0` / `platform: openharmony` / `arch: arm64` / `wasm: false`（jitless） |
 | 桥 | `127.0.0.1:4517`，`state: running`，`error: null` |
 | 协议 | SDK JSON-RPC（`--profile sdk`） |
@@ -73,8 +73,8 @@ hvigorw --mode module -p product=default assembleHap --no-daemon
 
 # 4) 安装并拉起
 hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
-hdc shell aa force-stop com.example.dshharmony
-hdc shell aa start -a EntryAbility -b com.example.dshharmony
+hdc shell aa force-stop com.qtepp.taharness
+hdc shell aa start -a EntryAbility -b com.qtepp.taharness
 ```
 
 只改 ArkTS（不动载荷）时可跳过第 2 步，构建约 35 s。
@@ -188,15 +188,15 @@ hdc shell aa start -a EntryAbility -b com.example.dshharmony
 
 ```bash
 # 1) 后端日志（最有信息量）
-hdc shell tail -50 /data/app/el2/100/base/com.example.dshharmony/haps/entry/files/node.log
+hdc shell tail -50 /data/app/el2/100/base/com.qtepp.taharness/haps/entry/files/node.log
 
 # 2) 桥状态
-hdc shell cat /data/app/el2/100/base/com.example.dshharmony/haps/entry/files/dsh-home/bridge-status.json
+hdc shell cat /data/app/el2/100/base/com.qtepp.taharness/haps/entry/files/dsh-home/bridge-status.json
 
 # 3) 应用内 设置 → 诊断（phase / stage / node.log 尾 120 行 / 崩溃记录）
 ```
 
-应用沙箱根：`/data/app/el2/100/base/com.example.dshharmony/haps/entry/files/`
+应用沙箱根：`/data/app/el2/100/base/com.qtepp.taharness/haps/entry/files/`
 
 ### 5.4 性能预算
 

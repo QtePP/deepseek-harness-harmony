@@ -105,7 +105,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 1. **设备型号与系统版本**（API 级别）
 2. **复现步骤**，越具体越好
 3. **实际行为 vs 预期行为**
-4. 相关日志：`devecocli log --level E --bundle-name com.example.dshharmony`
+4. 相关日志：`devecocli log --level E --bundle-name com.qtepp.taharness`
 5. 若涉及界面，附截图
 
 搜索已有 Issue 后再提，避免重复。

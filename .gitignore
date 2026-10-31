@@ -26,3 +26,6 @@ build-profile.signing.json5
 
 # Pinned local devecocli path (machine-specific, see scripts/deploy.sh)
 /.deveco-cli-path
+
+# Release signing material (AGC publishing certificate — never commit)
+/build-profile.release.json5

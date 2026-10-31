@@ -31,7 +31,7 @@ assignees: ''
 
 ## 日志
 
-<!-- devecocli log --level E --bundle-name com.example.dshharmony -->
+<!-- devecocli log --level E --bundle-name com.qtepp.taharness -->
 
 ```
 粘贴日志
