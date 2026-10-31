@@ -24,6 +24,12 @@ node scripts/assemble-payload.mjs   # 首次需装配载荷（约 225MB）
 bash scripts/deploy.sh              # 构建并安装到真机
 ```
 
+**CLI 版本**：`devecocli check arkts` 需要 **≥ 1.3.10**（1.3.0/1.3.4 没有该子命令，
+只能退到 `devecocli check lint`）。用 `devecocli --version` 确认。
+
+**首次跑起来后**：设置页要填 API Key，并把对话协议切到 **ACP** 再重启——否则纯 JS 搜索、
+密钥热更新等 ohos 插件不会挂载。详见 README「首次启动」。
+
 ## 提交前必做
 
 ```bash
@@ -32,6 +38,9 @@ devecocli check arkts <改动的 .ets 文件>
 
 # 2. 构建通过
 devecocli build
+
+# 3. 真机验证（涉及界面/协议时）
+devecocli run --device <serial> --skip-build
 
 # 3. 真机验证（涉及界面/协议时）
 devecocli run --device <serial> --skip-build

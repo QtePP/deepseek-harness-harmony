@@ -6,6 +6,7 @@
 **A native shell for running DeepSeek Harness locally on HarmonyOS devices.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-brightgreen)](https://github.com/QtePP/deepseek-harness-harmony/releases)
 [![Platform](https://img.shields.io/badge/Platform-HarmonyOS%20%7C%20API%2026-blue)](https://developer.huawei.com/consumer/cn/)
 [![Language](https://img.shields.io/badge/Language-ArkTS-3178C6)](https://developer.huawei.com/consumer/cn/arkts/)
 [![Runtime](https://img.shields.io/badge/Node-v24.2.0-339933)](https://nodejs.org/)
@@ -138,7 +139,18 @@ bash scripts/deploy.sh
 
 解包载荷约 60–90 秒 → 启动内嵌 Node → 连接本地桥 → 进入聊天界面。之后冷启约 3 秒。
 
-首次使用需在**设置页填入 DeepSeek API Key**（保存后约 2 秒生效）。
+**首次使用有两步必做设置：**
+
+1. **填入 DeepSeek API Key**（设置页，保存后约 2 秒生效，无需重启）
+2. **切换对话协议到 ACP**（设置 → 对话协议 → ACP → 保存 → **彻底退出并重开应用**）
+
+第 2 步容易漏。默认走 `sdk` profile，此时**纯 JS 搜索、密钥热更新、时间上下文都不会挂载**——
+表现为「搜索不好用」或「改了 key 不生效」。切到 ACP 后 profile 落到 `ohos`，这些插件才到位。
+协议在启动期读取，`node::Start` 每进程一次，所以**必须重启应用**才生效。
+
+> **只装一个**：桥固定占用 `127.0.0.1:4517`，且为单客户端。如果设备上还留着旧包名
+> （如 `com.example.dshharmony`）并正在运行，新包会因 `EADDRINUSE` 启动失败并报
+> `initialize: Invalid params [stage=exited]`。先 `hdc uninstall <旧包名>` 或 force-stop 旧应用。
 
 ## 技术要点
 
@@ -192,6 +204,8 @@ scripts/               # 载荷装配、一键部署
 | [BUILD.md](docs/BUILD.md) | 构建、签名、装机、排障 |
 | [GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) | 与桌面版的能力差距及根因 |
 | [SPIKE-ACP.md](docs/SPIKE-ACP.md) | ACP 协议实测记录 |
+| [PERSONAL-AGENT.md](docs/PERSONAL-AGENT.md) | 个人 Agent 与功能卡片演进方案 |
+| [NEEDS-ANALYSIS.md](docs/NEEDS-ANALYSIS.md) | 手机形态能力清单与需求评分 |
 | [ROADMAP.md](docs/ROADMAP.md) | 路线图 |
 
 ## 已知边界
@@ -203,6 +217,12 @@ scripts/               # 载荷装配、一键部署
 - **设备端不做图片降采样** —— 原尺寸上传，由服务端投影到视觉网格
 - **`run_code` 仅支持 JavaScript**，且当前默认未启用
 - **外部目录授权重启后需重新绑定**
+- **发布证书签名的 HAP 不能 `hdc` 直装** —— 平台限制（`not trusted app source`），
+  发布包只能经 AGC 分发；真机装机走调试签名（`scripts/deploy.sh`）
+- **同一设备只能跑一个实例** —— 桥固定 4517 端口且单客户端，新旧包名不能共存
+- **`DeepSeek-V4.1-Flash` 的模型目录被本地覆盖** —— 上游该模型带
+  `toolUpdate: addition-only`，会把全部工具标成延迟加载而被 API 拒绝
+  （`at least one tool must have defer_loading=false`）。见 `docs/BUILD.md`
 
 ## 贡献
 

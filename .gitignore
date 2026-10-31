@@ -32,3 +32,7 @@ build-profile.signing.json5
 
 # macOS Finder metadata
 .DS_Store
+
+# Raw device captures and composed store shots (rebuild with scripts/make-store-shots.py)
+/.build/shots
+/.build/store-shots
