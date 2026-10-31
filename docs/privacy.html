@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TA Harness 隐私政策</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.8; max-width: 42em; margin: 0 auto; padding: 1.5em 1.2em 4em;
+    color: #1d1d1f; background: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e8e8ed; background: #141416; }
+    a { color: #6cb2ff; }
+  }
+  h1 { font-size: 1.5em; }
+  h2 { font-size: 1.15em; margin-top: 2em; }
+  a { color: #0b6bcb; }
+  .meta { color: #888; font-size: 0.9em; }
+  ul, ol { padding-left: 1.4em; }
+  li { margin: 0.3em 0; }
+</style>
+</head>
+<body>
+<h1>TA Harness 隐私政策</h1>
+<p class="meta">应用名称：TA Harness　·　包名：com.qtepp.taharness　·　开发者：陈景翀（个人开发者）<br>
+生效日期：2026 年 10 月 31 日</p>
+
+<p>本政策说明 TA Harness（下称「本应用」）如何处理你的数据。本应用的设计原则是：
+<strong>所有数据保存在你的设备本机，应用本身不收集、不上传任何用户个人信息。</strong></p>
+
+<h2>1. 我们不收集什么</h2>
+<ul>
+  <li>无账号系统：无需注册、登录，不持有你的任何身份信息；</li>
+  <li>无数据收集组件：不内置任何统计、埋点、崩溃上报、广告或推送 SDK；</li>
+  <li>不上传使用记录：会话内容、使用习惯不会发送给开发者或任何第三方统计服务。</li>
+</ul>
+
+<h2>2. 本机存储了什么</h2>
+<p>以下数据全部保存在设备本机的应用沙箱目录内，仅你可访问：</p>
+<ul>
+  <li><strong>AI 会话记录</strong>：你与 AI 的对话、生成的文件，按会话保存在本机；</li>
+  <li><strong>项目与设置</strong>：你创建的项目、能力开关等偏好；</li>
+  <li><strong>模型 API Key</strong>：你自行填写的模型服务密钥（如 DeepSeek API Key），仅保存在本机沙箱文件中，不会上传到开发者的任何服务器。</li>
+</ul>
+
+<h2>3. 权限使用说明</h2>
+<ul>
+  <li><strong>网络访问（INTERNET）</strong>：用于调用你配置的模型 API、AI 工具访问网页；</li>
+  <li><strong>获取网络状态（GET_NETWORK_INFO）</strong>：用于判断当前网络可用性，提示连接状态；</li>
+  <li><strong>文件访问授权（FILE_ACCESS_PERSIST）</strong>：仅记住你主动授权给应用的目录，用于 AI 读写工作区文件与文件预览。你未授权的目录应用不会访问。</li>
+</ul>
+
+<h2>4. 第三方服务</h2>
+<ul>
+  <li><strong>模型服务</strong>：本应用的 AI 能力来自模型服务 API（默认支持 DeepSeek，需你自行注册并提供自己的 API Key）。你与 AI 的对话内容会<strong>从设备直接发送到对应模型服务商</strong>（如 api.deepseek.com），其数据处理受该服务商隐私政策约束，详见 <a href="https://www.deepseek.com" rel="noopener">DeepSeek 官网</a>；</li>
+  <li><strong>网页访问</strong>：使用 AI 内置的网页搜索 / 网页读取工具时，应用会从设备向目标网站发起请求；</li>
+  <li><strong>AI 运行时</strong>：AI 运行时完全在设备本机进程内运行，不连接开发者服务器，不经任何中间人转发。</li>
+</ul>
+
+<h2>5. 数据的存储与安全</h2>
+<p>本应用不将你的数据存储到云端。API Key 以仅应用可读的沙箱文件形式保存在本机。
+设备丢失或应用被卸载时，上述数据随沙箱一并清除。</p>
+
+<h2>6. 如何删除数据</h2>
+<ul>
+  <li>在应用内可随时删除会话与项目；</li>
+  <li>卸载应用即彻底删除本应用保存在本机的全部数据（含 API Key）。</li>
+</ul>
+
+<h2>7. 未成年人</h2>
+<p>本应用不面向未成年人提供，未成年人应在监护人指导下使用。</p>
+
+<h2>8. 政策更新</h2>
+<p>政策内容如有变更，将在本页面更新并修订生效日期。</p>
+
+<h2>9. 联系我们</h2>
+<p>如对本政策或本应用有疑问，请通过 GitHub 提交 Issue：
+<a href="https://github.com/QtePP/deepseek-harness-harmony/issues" rel="noopener">github.com/QtePP/deepseek-harness-harmony/issues</a></p>
+</body>
+</html>

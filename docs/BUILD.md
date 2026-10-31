@@ -148,24 +148,57 @@ debug-info.device-ids: [ ...只有你自己的几台设备... ]
 ### 本地构建
 
 ```bash
-# 1. 准备发布签名配置（gitignored）
-cp build-profile.signing.json5 build-profile.release.json5
-# 编辑它，把 certpath / profile / storeFile 换成发布材料，name 保持 default
+# 1. 准备发布签名材料（gitignored，只存 material 八字段，密码为明文）
+cat > build-profile.release.json5 <<'EOF'
+{
+  certpath: '/path/to/发布证书.cer',
+  keyAlias: '密钥别名',
+  keyPassword: '密钥密码',
+  profile: '/path/to/发布Profile.p7b',
+  signAlg: 'SHA256withECDSA',
+  storeFile: '/path/to/密钥库.p12',
+  storePassword: '密钥库密码',
+}
+EOF
 
 # 2. 构建（脚本会先校验 profile 里的 bundleName 是否匹配）
 bash scripts/build-release.sh
 ```
 
-产物：`entry/build/default/outputs/default/entry-default-signed.hap`
+一次构建产出两份产物：
 
-脚本做的事：校验 bundleName 一致性 → 注入发布签名 → `--build-mode release` 构建 →
-`trap` 兜底还原无签名状态。
+| 产物 | 用途 |
+|---|---|
+| `build/outputs/default/dshharmony-default-signed.app` | **AGC 提交（含测试轨道）上传**——AGC 的文件选择器直接过滤掉 .hap，只收 App Pack |
+| `entry/build/default/outputs/default/entry-default-signed.hap` | **hdc 直连安装** |
+
+**AGC 校验的是 .app 容器本身的签名（实测 2026-10-31）**：容器未签名的 .app 被测试轨道以
+`991 非法软件包`（"未检测"到签名）拒收。正确形态（= DevEco Studio 签名构建的产物）：
+**包内 HAP 保持未签名 + 容器整体签名**——hvigor `PackageApp` 装的永远是未签名 HAP
+（源码实证：所有 `getModuleTargetOutputFileName` 调用都传 signed=false），
+`SignApp` 给 .app 容器整体签名，AGC 分发时再拆包重签；官方 FAQ「其中的HAP包没有
+签名」说的就是这个设计。脚本用 `hap-sign-tool sign-app -inForm zip` 对容器签名
+（hvigor SignApp 的 CLI 等价）。
+
+脚本做的事：校验 bundleName 一致性 → `--build-mode release --assemble-type
+assembleApp` 一次构建出**未签名** HAP 与 .app（仓库口径的 `build-profile.json5`
+原样使用，无注入无还原）→ `hap-sign-tool` 以明文密码给 HAP 本地签名（hdc 直装用）→
+`hap-sign-tool sign-app -inForm zip` 给 .app 容器整体签名（AGC 上传用）→
+`verify-app` 对独立 HAP 与 .app 容器各校验一次。
+
+签名为什么绕开 hvigor SignHap：SignHap 只收 DevEco **加密格式**密码
+（≥32 字符的 `000000...` 密文），明文密码直接报 `00303116`；
+`hap-sign-tool sign-app` 收明文密码，且就是 DevEco 内部用的同一个签名工具。
+脚本工具链路径可用 `JAVA_BIN` / `SIGN_TOOL` 环境变量覆盖。
 
 ### 常见失败
 
 | 报错 | 原因 | 处理 |
 |---|---|---|
+| `00303116 Configuration Error`<br>`The length of the storePassword or keyPassword field ... is less than 32` | 把明文密码塞进了 `signingConfigs` 走 hvigor SignHap（只收 DevEco 加密密码） | 走 `scripts/build-release.sh`（hap-sign-tool 路径），别手动注入签名配置构建 |
 | `00303074 Configuration Error`<br>`bundleName ... does not match ... SigningConfigs` | 签名 profile 的 bundleName 与 `app.json5` 不一致 | 在 AGC 用新 bundleName 重新生成 profile |
+| AGC 报 `991 非法软件包`（"未检测"签名） | .app **容器**未签名——AGC 校验容器签名（hvigor SignApp 的职责），与包内 HAP 是否签名无关 | 上传 `dshharmony-default-signed.app`（`scripts/build-release.sh` 已用 `-inForm zip` 对容器签名） |
+| AGC 报 `992 包名不一致` | .app / pack.info 里的 bundleName 与 AGC 应用记录不符 | 核对 `AppScope/app.json5` 与 AGC 应用基础信息 |
 | 装上了但打不开 | 接收设备系统版本低于 `compatibleSdkVersion` | 当前要求 **API 26 / HarmonyOS 7.0.0** |
 | AGC 提示 bundleName 已占用 | `com.*` 命名空间全局唯一 | 换更独特的反写域名 |
 

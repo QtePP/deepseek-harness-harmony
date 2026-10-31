@@ -29,3 +29,6 @@ build-profile.signing.json5
 
 # Release signing material (AGC publishing certificate — never commit)
 /build-profile.release.json5
+
+# macOS Finder metadata
+.DS_Store

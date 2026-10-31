@@ -240,6 +240,20 @@ ACP 实测契约（勿凭直觉改）：
   `build-profile.signing.json5`（gitignored）。
 - `scripts/deploy.sh` 自动处理：检出备份或 `devecocli signature generate` → 构建 → 结束时
   还原无签名版本（trap 兜底；新生成的材料自动存回备份）。
+- 发布签名走 `scripts/build-release.sh`（三步，签名在 hvigor 之外）：`--build-mode release
+  --assemble-type assembleApp` 一次构建出未签名 HAP 与 .app → DevEco SDK 的
+  `hap-sign-tool sign-app` 以明文密码给 HAP 本地签名（hdc 直装用）→ `hap-sign-tool
+  sign-app -inForm zip` 给 .app **容器整体**签名（= hvigor SignApp 任务的 CLI 等价），
+  `verify-app` 对独立 HAP 与 .app 容器各校验一次。绕开 hvigor SignHap/SignApp 的原因：
+  它们只收 DevEco 加密密码（≥32 字符 `000000...` 密文），明文报 `00303116`。材料八字段
+  （含明文密码）在 `build-profile.release.json5`（gitignored）。
+- **AGC 提交（含测试轨道）只收 App Pack（.app），文件选择器过滤 .hap；且校验的是 .app
+  容器签名**——2026-10-31 实测：容器未签名的 .app 被测试轨道 991「非法软件包/未检测」
+  拒收，与包内 HAP 是否签名无关。**包内 HAP 本来就该是未签名的**（hvigor PackageApp
+  源码实证：所有 `getModuleTargetOutputFileName` 调用都传 signed=false；SignApp 只签
+  容器；AGC 分发时再拆包重签——官方 FAQ「其中的HAP包没有签名」说的就是这个设计）。
+  上传 `build/outputs/default/dshharmony-default-signed.app`（容器已签名）。已签 .hap
+  仅用于 hdc 直连安装分发。
 - 手动命令行构建的合并/还原配方见 `docs/BUILD.md`。
 
 已知边界（诚实清单）：无 token 级流式；无二进制工具（git/rg/bash）；密钥若随 rawfile 分发
@@ -298,6 +312,7 @@ ACP 实测契约（勿凭直觉改）：
 | `docs/BUILD.md` | 构建、签名、装机、排障（含受限环境坑） |
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
 | `docs/PLUGIN-MIGRATION.md` | 客户端插件迁移分级（P0/P1/P2/不迁） |
+| `docs/PERSONAL-AGENT.md` | 个人 Agent 与功能卡片演进方案（Agent Pack / CardSpec / 与 Muse 对比） |
 | `.workbuddy-ai/memory/` | 本地会话记忆（gitignored，不提交） |
 
 ## 10. Skill 路由（UI 设计）

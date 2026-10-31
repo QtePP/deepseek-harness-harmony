@@ -1,7 +1,7 @@
 {
   "app": {
     "bundleName": "com.qtepp.taharness",
-    "vendor": "example",
+    "vendor": "qtepp",
     "versionCode": 1000000,
     "versionName": "1.0.0",
     "icon": "$media:layered_image",
