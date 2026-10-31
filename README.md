@@ -50,20 +50,52 @@ This repository is the **HarmonyOS shell** for [DeepSeek Harness](https://github
 
 ## 截图
 
+<p align="center">
+  <img src="docs/images/home.png" alt="首页" width="280">
+</p>
+
 <table>
 <tr>
-<td width="50%">
+<td width="33%">
 
-**首页**
+**多模态：看图、算营养、落盘**
 
-<img src="docs/images/home.png" alt="首页" width="100%">
+<img src="store-assets/screenshots/01-chat.png" alt="多模态对话" width="100%">
 
 </td>
-<td width="50%">
+<td width="33%">
 
-**对话与产物**
+**工具轨迹：每一步都摊开**
 
-<img src="docs/images/chat.png" alt="对话" width="100%">
+<img src="store-assets/screenshots/02-trace.png" alt="工具轨迹" width="100%">
+
+</td>
+<td width="33%">
+
+**产物就在你自己的目录里**
+
+<img src="store-assets/screenshots/03-files.png" alt="项目文件" width="100%">
+
+</td>
+</tr>
+<tr>
+<td width="33%">
+
+**按项目分开的会话**
+
+<img src="store-assets/screenshots/04-sessions.png" alt="会话与项目" width="100%">
+
+</td>
+<td width="33%">
+
+**密钥、模型、权限都归你管**
+
+<img src="store-assets/screenshots/05-settings.png" alt="设置" width="100%">
+
+</td>
+<td width="33%">
+
+*截图由 [scripts/make-store-shots.py](scripts/make-store-shots.py) 从真机截图合成*
 
 </td>
 </tr>
