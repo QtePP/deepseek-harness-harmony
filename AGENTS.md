@@ -39,6 +39,20 @@
 | **time-context / 时间上下文** | `@deepseek-ai/dsh-time-context`（dsh 自带、随载荷分发）：把当前时间作为 durable 注入写进请求历史（默认 10 分钟一次），模型据此知道"今天"。**它不是工具**，桌面/SDK profile 由 `dsh-sdk-app` 挂载，`dsh-acp-app` 不含 → ohos bundle 自己 insert 一行；缺它时模型对相对日期的推理全是猜 | `@ohos/dsh-bundle-ohos/cordis.patch.yml` |
 | **boot-report / 能力自检** | `@ohos/dsh-boot-report`（ohos profile 专属）：启动 5s 后把已注册工具名与 `ctx.web.searchReady()/fetchReady()` 写进 `bridge.log`。手机没有终端，`web` 用 `ctx.get('web')` 而非 inject 读取，seam 整体缺失时也要报出来 | `host/profile-ohos/.../@ohos/dsh-boot-report` |
 
+### 2.1 英文口径（对外文案用，勿自创）
+
+一句话定位：**A native shell for running DeepSeek Harness locally on HarmonyOS devices.**
+（`oh-package.json5` 的 `description` 是另一套同义表述：`native ArkUI client with an in-process Node runtime`。）
+
+展开句：*No WebView, no screen mirroring, no tethering to a computer — the whole runtime lives inside the app process.*
+
+易错译法（每条都是口径错误，不是风格问题）：
+
+- ❌ `native port of dsh` / `dsh rewritten for HarmonyOS` → dsh 未被移植或改写，本仓库只是外壳
+- ❌ `spawns a Node subprocess` → 禁 fork/exec，Node 同进程内嵌
+- ❌ `offline` → 它要联网调模型 API；本意是「不连电脑」= standalone on-device / no tethering
+- ✅ 不套壳浏览器 = `not a WebView wrapper`；不投屏 = `no screen mirroring`
+
 ## 3. 架构口径（四层关系）
 
 1. **依赖**：AI 能力 100% 来自 npm dsh；`assemble-payload.mjs` 装配为载荷随 HAP 分发。

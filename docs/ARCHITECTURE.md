@@ -3,6 +3,11 @@
 目标：**在 HarmonyOS 设备上自足运行 dsh**——不连电脑、不投屏、不套壳浏览器。前端是原生
 ArkUI，后端是同一应用进程内的真 dsh 运行时。
 
+> *Goal: run `dsh` self-sufficiently on a HarmonyOS device — no computer tethering, no screen mirroring,
+> no WebView shell. The front end is native ArkUI; the back end is the real dsh runtime inside the
+> same app process. Not a port of dsh, not a subprocess: `dsh` stays the single brain, this repository is
+> only the host adaptation layer.*
+
 ```
 ┌─ 一个 HAP ─────────────────────────────────────────────────────────────┐
 │                                                                        │

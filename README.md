@@ -3,6 +3,7 @@
 # TA Harness
 
 **在鸿蒙设备上本地运行 DeepSeek Harness 的原生外壳**
+**A native shell for running DeepSeek Harness locally on HarmonyOS devices.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-HarmonyOS%20%7C%20API%2026-blue)](https://developer.huawei.com/consumer/cn/)
@@ -10,6 +11,8 @@
 [![Runtime](https://img.shields.io/badge/Node-v24.2.0-339933)](https://nodejs.org/)
 
 不套壳浏览器、不投屏、不连电脑 —— AI 能力全部运行在手机/平板/2in1 的同一应用进程内。
+
+*No WebView, no screen mirroring, no tethering to a computer — the whole runtime lives inside the app process.*
 
 </div>
 
@@ -27,6 +30,22 @@
 `dsh` 是这个仓库唯一的大脑 —— 会话、工具调用、插件、模型适配、持久化全部来自 npm 包 `@deepseek-ai/dsh`。本仓库不含任何 AI 能力，只有**宿主适配层 + 原生界面**。
 
 > 类比：VS Code 与其进程内扩展引擎；或 Electron 之于 Chromium + Node。
+
+<details>
+<summary>English</summary>
+
+This repository is the **HarmonyOS shell** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`):
+
+- **Native ArkUI interface** — not a WebView wrapper
+- **Node v24.2.0 embedded in the same app process** (NAPI `dlopen libnode.so`) — not a subprocess, not a remote call
+- **All data stays on the device** — session logs and workspace files live in the app sandbox
+- **Three form factors** — phone / tablet / 2in1, switching between single and dual column at the 840vp breakpoint
+
+`dsh` is the only brain here: sessions, tool calls, plugins, model adapters and persistence all come from the npm package `@deepseek-ai/dsh`. This repository contains no AI capability of its own — only the **host adaptation layer + native UI**.
+
+> Analogy: VS Code and its in-process extension engine; or Electron for Chromium + Node.
+
+</details>
 
 ## 截图
 

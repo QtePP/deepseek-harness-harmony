@@ -26,10 +26,10 @@ const PREVIEW_EXTS: string[] = [
 ]
 
 /** Activity bar geometry: grows per step, pins at BAR_MAX_WIDTH. */
-const BAR_SEGMENT_WIDTH: number = 10
-const BAR_SEGMENT_GAP: number = 3
+const BAR_SEGMENT_WIDTH: number = 8
+const BAR_SEGMENT_GAP: number = 4
 /** Widest the bar may get before it starts scrolling instead of growing. */
-const BAR_MAX_WIDTH: number = 220
+const BAR_MAX_WIDTH: number = 420
 
 /** The timeline grows with its content and scrolls only past this height. */
 const TIMELINE_MAX_HEIGHT: number = 280
@@ -866,6 +866,8 @@ export struct MessageItem {
   /** Measured content height; @State so the viewport re-hugs as the run grows. */
   @State timelineContentHeight: number = 0
   private timelineViewportHeight: number = 0
+  /** Measured width of the strip row, used to cap the activity bar. */
+  @State stripWidth: number = 0
   /** Pulse phase for the live bolt in the trace chip; advances while running. */
   @State boltPhase: number = 0
   private boltTimer: number = -1
@@ -1171,9 +1173,23 @@ export struct MessageItem {
     return count * BAR_SEGMENT_WIDTH + (count - 1) * BAR_SEGMENT_GAP
   }
 
-  /** Visible width: grows with the run, then pins so the strip can be dragged. */
+  /**
+   * Visible width: grows with the run, then pins so the strip can be dragged.
+   *
+   * The cap is the smaller of BAR_MAX_WIDTH and whatever the row can spare
+   * after the label group, so a 420vp bar never pushes the step count off the
+   * edge on a narrow phone.
+   */
   private barWidth(): number {
-    return Math.min(BAR_MAX_WIDTH, this.naturalBarWidth())
+    const labelReserve = 92
+    const available = this.chipAvailableWidth() - labelReserve
+    const cap = Math.max(120, Math.min(BAR_MAX_WIDTH, available))
+    return Math.min(cap, this.naturalBarWidth())
+  }
+
+  /** Width the strip may occupy; measured, with a conservative fallback. */
+  private chipAvailableWidth(): number {
+    return this.stripWidth > 0 ? this.stripWidth : 360
   }
 
 
@@ -1288,12 +1304,10 @@ export struct MessageItem {
         .scrollBar(BarState.Off)
         .edgeEffect(EdgeEffect.Spring)
         .align(Alignment.Start)
-        .flexShrink(1)
 
-        // Blank absorbs every spare pixel so the label group below is pinned to
-        // the right edge and can never ride over the bar.
-        Blank()
-
+        // No Blank: the label sits immediately after the bar. Pushing it to the
+        // far edge put a wide empty gap between the nodes and the step count,
+        // which read as two unrelated things instead of one strip.
         Row({ space: 6 }) {
           if (this.running) {
             // Live turn. This bolt tints rather than scales: the composer's
@@ -1329,6 +1343,17 @@ export struct MessageItem {
       }
       .alignItems(VerticalAlign.Center)
       .width('100%')
+      // Right-aligned as a unit: the strip hugs the trailing edge, but the bar
+      // and its label stay adjacent instead of being pushed apart by a Blank.
+      .justifyContent(FlexAlign.End)
+      // Measured once per layout so the bar cap tracks the real width.
+      .onAreaChange((oldArea: Area, newArea: Area) => {
+        const raw = newArea.width
+        const width = typeof raw === 'number' ? raw : 0
+        if (width > 0 && Math.abs(width - this.stripWidth) > 1) {
+          this.stripWidth = width
+        }
+      })
       // No plate: the bar and the label sit directly on the transcript, which
       // reads as one line of metadata instead of a floating control.
       .padding({ right: 2, top: 4, bottom: 4 })
