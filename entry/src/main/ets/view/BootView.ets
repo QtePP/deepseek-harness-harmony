@@ -7,9 +7,9 @@ export struct BootView {
   @Prop @Watch('onPhaseChanged') phase: BootPhase = BootPhase.IDLE
   @Prop detail: string = ''
   @Prop diagnostics: string = ''
-  /** Breathing opacity of the "Powered by" tagline below the name. */
+  /** Breathing opacity of the footer attribution. */
   @State tagOpacity: number = 1
-  /** Staged entrance: the hero rises in — logo springs, name and tagline follow. */
+  /** Staged entrance: the hero rises in — logo springs, then the title. */
   @State logoScale: number = 0.72
   @State logoOpacity: number = 0
   @State titleOpacity: number = 0
@@ -107,11 +107,6 @@ export struct BootView {
         .opacity(this.titleOpacity)
         .translate({ y: this.titleRise })
 
-      Text('Powered by DeepSeek Harness')
-        .fontSize(13)
-        .fontColor($r('app.color.text_secondary'))
-        .opacity(this.tagIntro * this.tagOpacity)
-
       if (this.isFailure()) {
         Text(this.label())
           .fontSize(18)
@@ -184,6 +179,15 @@ export struct BootView {
       Text('后端运行在本机应用进程内，不依赖电脑')
         .fontSize(12)
         .fontColor($r('app.color.text_tertiary'))
+        .margin({ bottom: 10 })
+
+      // Attribution sits at the very bottom, not under the title: the hero
+      // block should carry the product name alone, and the credit reads as a
+      // footer rather than as a subtitle competing with it.
+      Text('Powered by DeepSeek Harness')
+        .fontSize(11)
+        .fontColor($r('app.color.text_tertiary'))
+        .opacity(this.tagIntro * this.tagOpacity)
         .margin({ bottom: 24 })
     }
     .width('100%')
