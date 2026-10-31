@@ -170,7 +170,7 @@ bash scripts/build-release.sh
 | 产物 | 用途 |
 |---|---|
 | `build/outputs/default/dshharmony-default-signed.app` | **AGC 提交（含测试轨道）上传**——AGC 的文件选择器直接过滤掉 .hap，只收 App Pack |
-| `entry/build/default/outputs/default/entry-default-signed.hap` | **hdc 直连安装** |
+| `entry/build/default/outputs/default/entry-default-signed.hap` | 无 hdc 直装用途（见下：`9568322`），仅作签名链自检 |
 
 **AGC 校验的是 .app 容器本身的签名（实测 2026-10-31）**：容器未签名的 .app 被测试轨道以
 `991 非法软件包`（"未检测"到签名）拒收。正确形态（= DevEco Studio 签名构建的产物）：
@@ -182,7 +182,7 @@ bash scripts/build-release.sh
 
 脚本做的事：校验 bundleName 一致性 → `--build-mode release --assemble-type
 assembleApp` 一次构建出**未签名** HAP 与 .app（仓库口径的 `build-profile.json5`
-原样使用，无注入无还原）→ `hap-sign-tool` 以明文密码给 HAP 本地签名（hdc 直装用）→
+原样使用，无注入无还原）→ `hap-sign-tool` 以明文密码给 HAP 本地签名（签名链自检用）→
 `hap-sign-tool sign-app -inForm zip` 给 .app 容器整体签名（AGC 上传用）→
 `verify-app` 对独立 HAP 与 .app 容器各校验一次。
 
@@ -199,6 +199,7 @@ assembleApp` 一次构建出**未签名** HAP 与 .app（仓库口径的 `build-
 | `00303074 Configuration Error`<br>`bundleName ... does not match ... SigningConfigs` | 签名 profile 的 bundleName 与 `app.json5` 不一致 | 在 AGC 用新 bundleName 重新生成 profile |
 | AGC 报 `991 非法软件包`（"未检测"签名） | .app **容器**未签名——AGC 校验容器签名（hvigor SignApp 的职责），与包内 HAP 是否签名无关 | 上传 `dshharmony-default-signed.app`（`scripts/build-release.sh` 已用 `-inForm zip` 对容器签名） |
 | AGC 报 `992 包名不一致` | .app / pack.info 里的 bundleName 与 AGC 应用记录不符 | 核对 `AppScope/app.json5` 与 AGC 应用基础信息 |
+| `hdc install` 发布 HAP 报 `code:9568322`<br>`signature verification failed due to not trusted app source` | **发布 Profile 签的包平台禁止 hdc 直装**（官方 FAQ「手动签名失败的常见问题」场景六；真机实测 2026-10-31） | 真机装机走 `bash scripts/deploy.sh`（调试 Profile 签名）；发布包只经 AGC 分发 |
 | 装上了但打不开 | 接收设备系统版本低于 `compatibleSdkVersion` | 当前要求 **API 26 / HarmonyOS 7.0.0** |
 | AGC 提示 bundleName 已占用 | `com.*` 命名空间全局唯一 | 换更独特的反写域名 |
 
