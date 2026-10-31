@@ -136,6 +136,12 @@ struct Index {
   private reconnecting: boolean = false
   /** A turn was in flight when the bridge socket dropped. */
   private turnInFlight: boolean = false
+  /**
+   * Synchronous send latch. `running`/`turnInFlight` are set after awaits, so
+   * two taps in the same tick both pass the check; this flag flips before any
+   * await and closes that window.
+   */
+  private sendLatch: boolean = false
   /** A drop that arrived while the reconnect chain was already running. */
   private redispatchDisconnect: string = ''
   /** Pre-turn file snapshots, keyed by turn key (see Rollback.ets). */
@@ -608,6 +614,27 @@ struct Index {
   }
 
   private async send(text: string, attachPaths: string[]): Promise<void> {
+    // One turn at a time. The server rejects a second prompt with
+    // "a prompt is already in flight for this session", so a double tap used to
+    // surface as an error rather than simply being ignored. The composer also
+    // disables send while running; this is the belt to that braces, because the
+    // running flag is set asynchronously after the await above.
+    if (this.sendLatch || this.turnInFlight || this.running) {
+      return
+    }
+    this.sendLatch = true
+    try {
+      await this.dispatchSend(text, attachPaths)
+    } finally {
+      // Released in finally, not on each return path: a missed release would
+      // wedge the composer for the rest of the process (node::Start runs once,
+      // so there is no restart to fall back on).
+      this.sendLatch = false
+    }
+  }
+
+  /** The actual send, once the latch has confirmed this is the only one. */
+  private async dispatchSend(text: string, attachPaths: string[]): Promise<void> {
     if (this.host.isAcp()) {
       await this.sendAcp(text, attachPaths)
       return

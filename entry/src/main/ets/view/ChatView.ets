@@ -1820,6 +1820,11 @@ export struct ChatView {
   onForeignProject: (resolved: string) => string = () => ''
   onPickModel: () => void = () => {}
   onStop: () => void = () => {}
+  /** Send is allowed only with content staged and no turn in flight. */
+  private canSend(): boolean {
+    return !this.running && (this.draft.trim().length > 0 || this.attachPaths.length > 0)
+  }
+
   /** Long-press menu actions, forwarded from the shell. */
   onRollback: (messageId: string) => void = () => {}
   onFork: (messageId: string) => void = () => {}
@@ -2397,9 +2402,12 @@ export struct ChatView {
           Button('发送', { type: ButtonType.Capsule })
             .height(44)
             .padding({ left: 8, right: 8 })
-            .backgroundColor(this.draft.trim().length > 0 || this.attachPaths.length > 0 ?
+            // Disabled while a turn is live: the server refuses a second prompt
+            // ("a prompt is already in flight"), so letting the tap through only
+            // produced an error message. `canSend` folds both conditions.
+            .backgroundColor(this.canSend() ?
               $r('app.color.brand') : $r('app.color.surface_muted'))
-            .fontColor(this.draft.trim().length > 0 || this.attachPaths.length > 0 ?
+            .fontColor(this.canSend() ?
               Color.White : $r('app.color.text_tertiary'))
             .scale({
               x: this.sendPressed ? 0.96 : 1,
@@ -2413,7 +2421,7 @@ export struct ChatView {
                 this.sendPressed = false
               }
             })
-            .enabled(this.draft.trim().length > 0 || this.attachPaths.length > 0)
+            .enabled(this.canSend())
             .onClick(() => {
               const text = this.draft.trim()
               if (text.length === 0 && this.attachPaths.length === 0) {
