@@ -55,6 +55,50 @@
     {
       "name": "code_background",
       "value": "#1B1E25"
+    },
+    {
+      "name": "ink",
+      "value": "#EDE6DA"
+    },
+    {
+      "name": "ink_soft",
+      "value": "#A79C8D"
+    },
+    {
+      "name": "ink_faint",
+      "value": "#6F6759"
+    },
+    {
+      "name": "paper",
+      "value": "#14120F"
+    },
+    {
+      "name": "paper_raised",
+      "value": "#1D1A16"
+    },
+    {
+      "name": "paper_sunken",
+      "value": "#100E0C"
+    },
+    {
+      "name": "rule",
+      "value": "#2C2823"
+    },
+    {
+      "name": "seal",
+      "value": "#D4685A"
+    },
+    {
+      "name": "seal_soft",
+      "value": "#B5523F"
+    },
+    {
+      "name": "jade",
+      "value": "#7FAF92"
+    },
+    {
+      "name": "bronze",
+      "value": "#C2A067"
     }
   ]
 }
