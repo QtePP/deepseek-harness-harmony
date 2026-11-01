@@ -28,6 +28,7 @@ import { FilesPanel } from '../view/FilesPanel'
 import { SessionRail } from '../view/SessionRail'
 import { SettingsSheet } from '../view/SettingsSheet'
 import { BoardState, SceneOption, boardAvailable, readBoard } from '../model/SanguoBoard'
+import { RunStats, readRunStats } from '../model/SanguoRun'
 import { SanguoBoard } from '../view/SanguoBoardView'
 
 /** dsh pass-through admission budget: encoded bytes and decoded pixels per image. */
@@ -124,6 +125,12 @@ struct Index {
    * the same thing a second later.
    */
   @State board: BoardState = new BoardState()
+  /**
+   * Counters and the drift trail for the current run, read from the save and
+   * the append-only history. Kept beside `board` rather than inside it because
+   * the projection is a per-turn snapshot while these are the run's totals.
+   */
+  @State run: RunStats = new RunStats()
   /** Whether the board (rather than the transcript) is showing. */
   @State showBoard: boolean = false
   /** A board-issued action is in flight; guards double taps. */
@@ -488,10 +495,12 @@ struct Index {
     const workspace = this.workspaceOf(this.currentProjectId)
     if (workspace.length === 0) {
       this.board = new BoardState()
+      this.run = new RunStats()
       this.boardAvailable = false
       return
     }
     this.board = readBoard(workspace)
+    this.run = readRunStats(workspace)
     this.boardAvailable = boardAvailable(workspace)
   }
 
@@ -2065,6 +2074,7 @@ struct Index {
                 Column() {
                   SanguoBoard({
                     board: this.board,
+                    run: this.run,
                     running: this.running,
                     busy: this.boardBusy,
                     onChoose: (option: SceneOption) => {
@@ -2136,6 +2146,7 @@ struct Index {
               if (this.showBoard) {
                 SanguoBoard({
                   board: this.board,
+                  run: this.run,
                   running: this.running,
                   busy: this.boardBusy,
                   onChoose: (option: SceneOption) => {

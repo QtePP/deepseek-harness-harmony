@@ -1,6 +1,9 @@
 import { ATTRIBUTE_LABELS, BoardState, PersonView, SceneOption, effectsSummary } from '../model/SanguoBoard'
 import { DriftPoint, RunStats } from '../model/SanguoRun'
 
+/** Plot height for the drift trail; also the scale for one bar. */
+const TRAIL_HEIGHT = 24
+
 /**
  * The board: a native surface for one run of the Sanguo engine.
  *
@@ -96,6 +99,42 @@ export struct SanguoBoard {
       .height(3)
     }
     .layoutWeight(1)
+  }
+
+  /**
+   * The drift trail: one bar per resolved turn, oldest first.
+   *
+   * A departure is drawn in the seal colour, everything else in the rule
+   * colour, so the trail reads as "where I left the road" rather than as a
+   * generic sparkline. Height is the absolute drift, not the delta — drift is
+   * cumulative and decays slowly, and a delta plot would hide exactly the
+   * ratchet the player needs to see.
+   */
+  @Builder
+  trail() {
+    Row({ space: 2 }) {
+      ForEach(this.run.series, (point: DriftPoint) => {
+        Column() {
+          Row()
+            .width('100%')
+            .height(this.barHeight(point.drift))
+            .borderRadius(1)
+            .backgroundColor(point.departure ? $r('app.color.seal') : $r('app.color.rule'))
+        }
+        .height(TRAIL_HEIGHT)
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.End)
+      }, (point: DriftPoint) => `${point.index}.${point.drift}.${point.departure}`)
+    }
+    .width('100%')
+    .height(TRAIL_HEIGHT)
+    .alignItems(VerticalAlign.Bottom)
+  }
+
+  /** Bar height for one drift value: a 3vp floor keeps a zero readable. */
+  private barHeight(drift: number): number {
+    const clamped = Math.min(100, Math.max(0, drift))
+    return 3 + Math.round((clamped / 100) * (TRAIL_HEIGHT - 3))
   }
 
   /** One tappable option: label, declared price, and the note. */
@@ -225,6 +264,44 @@ export struct SanguoBoard {
             .width('100%')
             .padding({ left: 20, right: 20, top: 14, bottom: 16 })
 
+            // ---- 势: the price of leaving the road -----------------------
+            // The number alone reads as one more stat. The trail is what makes
+            // it legible: same data, but it answers "how far did I walk off"
+            // instead of "where am I standing".
+            Column({ space: 8 }) {
+              Row({ space: 8 }) {
+                Text('势')
+                  .fontSize(11)
+                  .fontColor($r('app.color.ink_faint'))
+                Text(this.board.world.mood)
+                  .fontSize(11)
+                  .fontColor(this.board.world.drift > 35 ? $r('app.color.seal') : $r('app.color.ink_soft'))
+                Blank()
+                Text(this.run.deviations > 0 ? `偏离 ${this.run.deviations} 次` : '未离史载')
+                  .fontSize(11)
+                  .fontColor(this.run.deviations > 0 ? $r('app.color.seal') : $r('app.color.ink_faint'))
+                  .fontFeature('"tnum" 1')
+              }
+              .width('100%')
+
+              // Inline rather than `run.hasTrail()`: @Prop deep-copies the
+              // object, and a copied instance must not be relied on to keep
+              // its prototype methods.
+              if (this.run.series.length > 1) {
+                this.trail()
+              }
+
+              Text(`已行 ${this.run.turns} 手 · 抉择 ${this.run.choices} 次`)
+                .fontSize(10)
+                .fontColor($r('app.color.ink_faint'))
+                .fontFeature('"tnum" 1')
+                .width('100%')
+                .textAlign(TextAlign.Start)
+            }
+            .width('100%')
+            .padding({ left: 20, right: 20, top: 0, bottom: 16 })
+            .alignItems(HorizontalAlign.Start)
+
             // ---- the scene ----------------------------------------------
             if (!this.board.scene.finished) {
               Column({ space: 14 }) {
@@ -274,6 +351,30 @@ export struct SanguoBoard {
               }
               .width('100%')
               .padding({ left: 20, right: 20, top: 4, bottom: 16 })
+            }
+
+            // ---- the act is spent ---------------------------------------
+            // Not an ending: the engine reports that this act has no scenes
+            // left, and time can still pass. Leaving the middle of the screen
+            // empty here read as a bug rather than as a lull.
+            if (this.board.scene.finished) {
+              Column({ space: 8 }) {
+                Text('本幕已尽')
+                  .fontSize(16)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor($r('app.color.ink'))
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+                Text('让时间继续走，或者直接说你想做什么。')
+                  .fontSize(13)
+                  .lineHeight(20)
+                  .fontColor($r('app.color.ink_soft'))
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+              }
+              .width('100%')
+              .padding({ left: 20, right: 20, top: 4, bottom: 16 })
+              .alignItems(HorizontalAlign.Start)
             }
 
             // ---- people -------------------------------------------------
