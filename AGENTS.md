@@ -37,6 +37,7 @@
 | **ptc-runtime-vm / run_code** | in-process PTC 运行时（`@ohos/dsh-ptc-runtime-vm`，worker_threads + `node:vm`，随载荷分发）：`tools` 行 `mode: native`（2026-10-29 起，此前短暂为 `mode: ptc`；dsh-base 默认即 native——`tools` 行省略 mode 时的 schema 默认值）。**native 下模型工具表 21 个直出工具（glob/grep/read/write/web_search/web_fetch/edit/skill/subagent/todo_write 等），`run_code` 不在其中**——dsh-tools 只在非 native 模式把 run_code 注入可见表（`dsh-tools/lib/index.js` view()：`mode !== "native"` 才 `visible.set(RUN_CODE_NAME)`）；`mode: ptc` 则反过来：wire 上**只有 run_code**（wireSchemas 过滤掉其余 schema），其余工具只能经程序内 `tools.*` SDK。boot-report 的 `tools(N)` 用 `ctx.tools.schemas()`（注册表视图），ptc 模式下计 22（全部 + run_code），native 下计 21。ptc-runtime-vm 仍挂载（提供 `ctx.ptcRuntime`），未来 preset 可经 `dsh-agent-tool-presentation` 行（`tool-presentation`，preset 级 `presentAs`）opt-in PTC；worker 不可用时优雅 `worker-exit` | `host/profile-ohos/.../@ohos/dsh-ptc-runtime-vm`、`.build/payload/node_modules/@deepseek-ai/dsh-tools/lib/index.js` |
 | **credentials-live / 密钥热更新** | `@ohos/dsh-credentials-live`（随载荷分发，ohos profile 专属）：目录级 fs.watch + 1.5s 轮询 `<dsh-home>/.api-key`，变化经 `credentials.set()/unset()` 热发布。dsh 启动期冻结 env 快照（`loadLayeredEnv` 拷 `process.env`），运行中改 env 永远无效——这是唯一热路径；Settings 保存密钥 ~2s 生效无需重启（ACP 路径；SDK profile 无此插件，重启生效） | `host/profile-ohos/.../@ohos/dsh-credentials-live` |
 | **time-context / 时间上下文** | `@deepseek-ai/dsh-time-context`（dsh 自带、随载荷分发）：把当前时间作为 durable 注入写进请求历史（默认 10 分钟一次），模型据此知道"今天"。**它不是工具**，桌面/SDK profile 由 `dsh-sdk-app` 挂载，`dsh-acp-app` 不含 → ohos bundle 自己 insert 一行；缺它时模型对相对日期的推理全是猜 | `@ohos/dsh-bundle-ohos/cordis.patch.yml` |
+| **sanguo engine / 三国裁判引擎** | `@ohos/dsh-sanguo`（ohos profile 专属，随载荷分发）：扮演刘备的三国人生模拟的**裁判**——掷骰（xorshift32，状态存存档内，不可重载刷骰）、判成败（难度夹在 10–95，模型建议只作 hint）、算数值（名望/信义/人才 0–100 不环绕）、推演势力（按年出场/退场 + `ADJACENCY` 接壤表 + 本州 `home` 加防）、记人物记忆（disposition 由 memory 派生，不是滑杆）、算「势」（偏离史载的代价，**只惩罚不否决**）。五个工具 `sanguo_new/status/choose/act/advance`。**为什么是插件不是工作区脚本**：native 模式 `run_code` 不在工具表、`bash` 被 patch 移除，工作区里的 `.js` 没有任何东西能执行 | `host/profile-ohos/.../@ohos/dsh-sanguo`、`agents/sanguo-life` |
 | **boot-report / 能力自检** | `@ohos/dsh-boot-report`（ohos profile 专属）：启动 5s 后把已注册工具名与 `ctx.web.searchReady()/fetchReady()` 写进 `bridge.log`。手机没有终端，`web` 用 `ctx.get('web')` 而非 inject 读取，seam 整体缺失时也要报出来 | `host/profile-ohos/.../@ohos/dsh-boot-report` |
 
 ### 2.1 英文口径（对外文案用，勿自创）
@@ -292,11 +293,13 @@ ACP 实测契约（勿凭直觉改）：
      `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-tool-fs-search-js && node --test test/*.test.mjs`（38/38）；
      `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-ptc-runtime-vm && node --test test/*.test.mjs`（22/22，
      加 `--jitless` 再跑一遍证明无 WASM 路径）；
-     `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-credentials-live && node --test test/*.test.mjs`（8/8）。
+     `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-credentials-live && node --test test/*.test.mjs`（8/8）；
+     `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-sanguo && node --test test/*.test.mjs`（97/97，
+     加 `--jitless` 再跑一遍：引擎必须无 WASM 依赖）。
     - **配置层**：`DSH_HOME=.build/ohos-e2e node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js --profile ohos --patch .build/payload/patches/ohos.patch.yml --dump-config`
       → `tool-bash`/`tool-pwsh`/`tool-jobs`/`tool-fs-search`/`ptc-runtime` 均为 `disabled: true`；
       `tools` 行 `config.mode: native`；末尾有 `- id: tool-fs-search-ohos`、`- id: ptc-runtime-vm`、
-      `- id: credentials-live-ohos`、`- id: time-context` 与 `- id: boot-report-ohos`。
+      `- id: credentials-live-ohos`、`- id: time-context`、`- id: boot-report-ohos` 与 `- id: sanguo-ohos`。
      **`--profile ohos` 读的是 `$DSH_HOME/profiles/ohos`（不自动安装）**：模板变更后必须先
      `rm -rf .build/ohos-e2e/profiles/ohos && cp -R .build/payload/profile-ohos/profiles/ohos .build/ohos-e2e/profiles/ohos`
      再跑 dump，否则读到旧模板出现假阴性。
@@ -320,6 +323,8 @@ ACP 实测契约（勿凭直觉改）：
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
 | `docs/PLUGIN-MIGRATION.md` | 客户端插件迁移分级（P0/P1/P2/不迁） |
 | `docs/PERSONAL-AGENT.md` | 个人 Agent 与功能卡片演进方案（Agent Pack / CardSpec / 与 Muse 对比） |
+| `entry/src/main/ets/view/SanguoBoardView.ets` | 三国棋盘的**原生 ArkTS 前端**：读 `.sanguo/life.json` 投影（`model/SanguoBoard.ets` 解析），手机顶部切换器单栏、平板 340vp 右栏双栏；选项在点击前就显示代价；动作走普通 prompt（不另开通道） |
+| `agents/` | 可整包投放的 Agent pack：`match-coach`（对局中压缩输出）、`openworld-guide`（开放世界分层提示）、`story-guide`（剧情三源标注）、`sanguo-guide`（三国开放世界 + 自有设定集，四源标注）、`sanguo-life`（**能真的玩**：带 `@ohos/dsh-sanguo` 裁判引擎，扮演刘备，可偏离史载）；用 `scripts/check-agent-pack.mjs` 校验 |
 | `.workbuddy-ai/memory/` | 本地会话记忆（gitignored，不提交） |
 
 ## 10. Skill 路由（UI 设计）
