@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "match-coach",
+  "name": "对局军师",
+  "emoji": "🎯",
+  "accent": "amber",
+  "home": "chat",
+  "cards": ["review"],
+  "skills": ["quick-call", "match-review", "patch-notes"],
+  "schedule": [],
+  "notes": "边玩边问型 Agent：热路径零工具调用，三行输出。不做自动操作、不读游戏内存、不碰外挂。"
+}

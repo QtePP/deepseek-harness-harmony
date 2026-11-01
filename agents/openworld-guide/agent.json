@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "openworld-guide",
+  "name": "探索向导",
+  "emoji": "🧭",
+  "accent": "teal",
+  "home": "chat",
+  "cards": ["progress"],
+  "skills": ["hint-ladder", "team-build", "quest-log", "patch-notes"],
+  "schedule": [],
+  "notes": "开放世界边玩边问型 Agent：分层提示 + 剧透闸门 + 位置不编。不做自动采集、不做修改器。"
+}
