@@ -115,6 +115,17 @@ This repository is the **HarmonyOS shell** for [DeepSeek Harness](https://github
 | **图片输入** | 支持相册选择与系统分享 |
 | **密钥热更新** | 设置页保存 API Key 后约 2 秒生效，无需重启 |
 | **权限三档** | 只读 / 平衡 / 宽松，沙箱与审批捆绑 |
+| **Agent pack** | 可整包投放的角色设定（`agents/`），含对局教练、开放世界向导、剧情向导、三国等 |
+| **原生棋盘视图** | 三国人生模拟带专属 ArkTS 棋盘，选项在点击前就显示代价 |
+
+### 能真的玩的那种 Agent
+
+`agents/sanguo-life` 不只是提示词，它带一个**裁判引擎**（`@ohos/dsh-sanguo`）：
+掷骰、判成败、算数值、推演势力、记人物记忆，五个工具 `sanguo_new / status / choose / act / advance`。
+
+为什么要做成插件而不是工作区脚本——因为 `native` 模式下 `run_code` 不在工具表、
+`bash` 被平台补丁移除，工作区里放的 `.js` **没有任何东西能执行**。
+这是平台约束直接塑造了设计。
 
 ## 架构
 
@@ -232,6 +243,7 @@ scripts/               # 载荷装配、一键部署
 
 | 文档 | 内容 |
 |---|---|
+| [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构图、协议面、事件渲染表 |
 | [BUILD.md](docs/BUILD.md) | 构建、签名、装机、排障 |
 | [GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) | 与桌面版的能力差距及根因 |
