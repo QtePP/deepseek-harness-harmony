@@ -12,6 +12,10 @@
 /.appanalyzer
 # Local secrets — never commit
 entry/src/main/resources/rawfile/secrets.json
+# AGC project config carries client_secret and api_key. This app does not use
+# the AGC SDK, so it should never appear here; ignored as a guard.
+agconnect-services.json
+**/agconnect-services.json
 
 # Assembled dsh payload (regenerate with scripts/assemble-payload.mjs)
 entry/src/main/resources/rawfile/dsh-payload.zip
