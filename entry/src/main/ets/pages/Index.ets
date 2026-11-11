@@ -15,6 +15,7 @@ import { renderBlocks, RenderedBlock } from '../model/DshClient'
 import { DirGrant } from '../host/DirGrant'
 import { ShareInbox } from '../model/ShareInbox'
 import { FileTouch, RollbackReport, SnapshotStore, writePathsOf } from '../model/Rollback'
+import { TodoItem, isTodoTool, todosFromJson, todosFromRaw } from '../model/TodoModel'
 import { EventLike, LinkState, SessionEventPayload, SessionStatusPayload } from '../model/Protocol'
 import {
   AcpConfigOption, AcpContentBlock, AcpModelChoice, AcpPermissionRequest, AcpSessionNewResult,
@@ -49,8 +50,16 @@ function clipText(text: string, max: number): string {
   return text.length > max ? `${text.substring(0, max)}…` : text
 }
 
-/** One-line-ish digest of a tool call's arguments for the collapsed row. */
-function digestToolInput(raw: Record<string, Object> | undefined): string {
+/**
+ * One-line-ish digest of a tool call's arguments for the collapsed row.
+ *
+ * `cap` exists for the todo projection: the plan bar is rebuilt from this
+ * persisted digest after a cold start, so a `todo_write` list must survive
+ * whole — clipping it at the display cap would truncate the JSON and leave the
+ * bar showing an older plan.
+ */
+function digestToolInput(raw: Record<string, Object> | undefined,
+  cap: number = MAX_TOOL_INPUT_CHARS): string {
   if (raw === undefined) {
     return ''
   }
@@ -62,15 +71,29 @@ function digestToolInput(raw: Record<string, Object> | undefined): string {
     if (typeof value === 'string') {
       const text = value as string
       if (text.length > 0) {
-        return clipText(text, MAX_TOOL_INPUT_CHARS)
+        return clipText(text, cap)
       }
     }
   }
   try {
-    return clipText(JSON.stringify(raw), MAX_TOOL_INPUT_CHARS)
+    return clipText(JSON.stringify(raw), cap)
   } catch (error) {
     return ''
   }
+}
+
+/**
+ * One message the user typed while a run was live.
+ *
+ * ACP refuses a second `session/prompt` on a running session
+ * (`a prompt is already in flight for this session`, dsh acp/session.ts), so
+ * steering cannot be a second prompt. Queuing keeps the intent — the message
+ * goes out the instant the turn settles — without pretending the engine can
+ * take it mid-turn.
+ */
+interface QueuedTurn {
+  text: string
+  paths: string[]
 }
 
 /**
@@ -113,6 +136,10 @@ struct Index {
   /** Share prefill landing in the composer (absorbed once by ChatView). */
   @State shareText: string = ''
   @State attachPaths: string[] = []
+  /** Turns typed during a live run; drained one per settle. */
+  @State queued: QueuedTurn[] = []
+  /** The model's standing plan, projected from its latest `todo_write`. */
+  @State todos: TodoItem[] = []
 
   private host: NodeHost = NodeHost.get()
   private store: SessionStore = new SessionStore()
@@ -254,12 +281,14 @@ struct Index {
       this.currentId = newSessionId()
       this.messages = []
       this.title = '新会话'
+      this.todos = []
       return
     }
     const latest = this.sessions[0]
     this.currentId = latest.id
     this.messages = await this.store.load(latest.id)
     this.title = latest.title
+    this.refreshTodos()
   }
 
   private async boot(): Promise<void> {
@@ -316,6 +345,12 @@ struct Index {
     if (type === 'tool/call') {
       const name = event.data?.name === undefined ? '工具' : event.data?.name
       const args = event.data?.arguments === undefined ? '' : event.data?.arguments
+      if (isTodoTool(name)) {
+        const plan = todosFromJson(args)
+        if (plan !== null) {
+          this.todos = plan
+        }
+      }
       if (this.traceRow === null) {
         // The trace rides the assistant row this turn's thinking lives on;
         // a call before any message gets a fresh host row.
@@ -333,7 +368,7 @@ struct Index {
         this.traceRow = host
       }
       const entry = new ToolTrace(name)
-      entry.input = clipText(args, MAX_TOOL_INPUT_CHARS)
+      entry.input = clipText(args, isTodoTool(name) ? MAX_TOOL_OUTPUT_CHARS : MAX_TOOL_INPUT_CHARS)
       entry.reasonOffset = this.traceRow.reasoning.length
       this.traceRow.trace = this.traceRow.trace.concat([entry])
       return
@@ -365,6 +400,9 @@ struct Index {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, text, note))
       }
       void this.persist()
+      // SDK profile: the prompt returned a receipt long ago, so the settle is
+      // this event. A queued message waits exactly for it.
+      this.flushQueue()
       return
     }
   }
@@ -614,12 +652,13 @@ struct Index {
   }
 
   private async send(text: string, attachPaths: string[]): Promise<void> {
-    // One turn at a time. The server rejects a second prompt with
-    // "a prompt is already in flight for this session", so a double tap used to
-    // surface as an error rather than simply being ignored. The composer also
-    // disables send while running; this is the belt to that braces, because the
-    // running flag is set asynchronously after the await above.
+    // One turn at a time. ACP rejects a second prompt with "a prompt is already
+    // in flight for this session", so a message typed mid-run is queued rather
+    // than rejected: it goes out when the run settles (flushQueue). The latch
+    // below is the belt to that braces, because `running` is set asynchronously
+    // after the await in the dispatch path.
     if (this.sendLatch || this.turnInFlight || this.running) {
+      this.enqueue(text, attachPaths)
       return
     }
     this.sendLatch = true
@@ -630,7 +669,103 @@ struct Index {
       // wedge the composer for the rest of the process (node::Start runs once,
       // so there is no restart to fall back on).
       this.sendLatch = false
+      this.flushQueue()
     }
+  }
+
+  /** Park one message behind the live turn. */
+  private enqueue(text: string, attachPaths: string[]): void {
+    if (text.trim().length === 0 && attachPaths.length === 0) {
+      return
+    }
+    const item: QueuedTurn = { text: text, paths: attachPaths.slice() }
+    this.queued = this.queued.concat([item])
+    this.getUIContext().getPromptAction().showToast({
+      message: '本轮进行中，已排队；结束后自动发送',
+      duration: 2000
+    })
+  }
+
+  /** Drop one queued message by index (the strip's × button). */
+  private dequeueAt(index: number): void {
+    if (index < 0 || index >= this.queued.length) {
+      return
+    }
+    const next = this.queued.slice()
+    next.splice(index, 1)
+    this.queued = next
+  }
+
+  /**
+   * "立即发送": cut the running turn short, then let the settle path drain the
+   * queue. Cancelling is the only way to get a new prompt admitted mid-turn —
+   * ACP has no steering channel — so the button is honest about what it does.
+   */
+  private sendQueuedNow(): void {
+    if (this.queued.length === 0) {
+      return
+    }
+    if (this.running && this.host.isAcp()) {
+      this.stopAcp()
+      return
+    }
+    this.flushQueue()
+  }
+
+  /**
+   * Send the head of the queue once the transcript is idle again.
+   *
+   * Deferred by a macrotask on purpose: this runs from the `finally` of a send,
+   * where the latch is still held; re-entering `send` synchronously would bounce
+   * the same message back into the queue. One tick later the latch is clear and
+   * the guard admits it.
+   */
+  private flushQueue(): void {
+    if (this.queued.length === 0 || this.running || this.turnInFlight || this.sendLatch) {
+      return
+    }
+    if (this.phase !== BootPhase.READY) {
+      return
+    }
+    const head = this.queued[0]
+    this.queued = this.queued.slice(1)
+    setTimeout(() => {
+      void this.send(head.text, head.paths)
+    }, 0)
+  }
+
+  /**
+   * Rebuild the plan bar from the transcript.
+   *
+   * The list lives in the `todo_write` arguments, which are persisted with the
+   * trace — so a reopened conversation shows the plan it ended on without a
+   * round trip, and a session with no todo call clears the bar instead of
+   * inheriting the previous conversation's plan.
+   */
+  private refreshTodos(): void {
+    for (let index = this.messages.length - 1; index >= 0; index--) {
+      const trace = this.messages[index].trace
+      for (let entry = trace.length - 1; entry >= 0; entry--) {
+        if (!isTodoTool(trace[entry].name)) {
+          continue
+        }
+        const parsed = todosFromJson(trace[entry].input)
+        if (parsed !== null) {
+          this.todos = parsed
+          return
+        }
+      }
+    }
+    this.todos = []
+  }
+
+  /** Queued texts in the shape the composer strip renders. */
+  private queuedTexts(): string[] {
+    const out: string[] = []
+    for (const item of this.queued) {
+      out.push(item.text)
+    }
+    return out
   }
 
   /** The actual send, once the latch has confirmed this is the only one. */
@@ -1087,9 +1222,16 @@ struct Index {
       }
       const entry = new ToolTrace(name)
       entry.callId = callId
-      entry.input = digestToolInput(update.rawInput)
+      entry.input = digestToolInput(update.rawInput,
+        isTodoTool(name) ? MAX_TOOL_OUTPUT_CHARS : MAX_TOOL_INPUT_CHARS)
       entry.reasonOffset = this.traceRow.reasoning.length
       entry.status = update.status === undefined ? 'in_progress' : update.status
+      if (isTodoTool(name)) {
+        const plan = todosFromRaw(update.rawInput)
+        if (plan !== null) {
+          this.todos = plan
+        }
+      }
       if (entry.status === 'completed' || entry.status === 'failed') {
         entry.doneAt = Date.now()
       }
@@ -1355,6 +1497,8 @@ struct Index {
       this.liveAssistant = null
       this.traceRow = null
       this.toolRows.clear()
+      this.queued = []
+      this.todos = []
       this.showSessions = false
       return
     }
@@ -1362,6 +1506,8 @@ struct Index {
     this.messages = []
     this.title = '新会话'
     this.running = false
+    this.queued = []
+    this.todos = []
     this.showSessions = false
   }
 
@@ -1385,6 +1531,17 @@ struct Index {
     this.liveAssistant = null
     this.traceRow = null
     this.toolRows.clear()
+    // A queue belongs to the conversation it was typed in; carrying it into a
+    // different session would send the words to the wrong context. Say so —
+    // silently dropping typed text is the one thing a queue must not do.
+    if (this.queued.length > 0) {
+      this.getUIContext().getPromptAction().showToast({
+        message: `已切换会话，${this.queued.length} 条排队消息未发送`,
+        duration: 2400
+      })
+    }
+    this.queued = []
+    this.refreshTodos()
   }
 
   /**
@@ -1420,6 +1577,8 @@ struct Index {
     this.liveAssistant = null
     this.traceRow = null
     this.toolRows.clear()
+    this.queued = []
+    this.todos = []
     if (this.sessions.length === 0) {
       this.currentId = newSessionId()
       this.messages = []
@@ -1431,6 +1590,7 @@ struct Index {
     this.currentId = latest.id
     this.messages = await this.store.load(latest.id)
     this.title = latest.title
+    this.refreshTodos()
   }
 
   /**
@@ -1921,6 +2081,8 @@ struct Index {
                 canStop: this.host.isAcp(),
                 shareText: this.shareText,
                 attachPaths: this.attachPaths,
+                queued: this.queuedTexts(),
+                todos: this.todos,
                 onSend: (text: string, attachPaths: string[]) => {
                   void this.send(text, attachPaths)
                 },
@@ -1939,6 +2101,8 @@ struct Index {
                   this.showModelSheet = true
                 },
                 onStop: () => this.stopAcp(),
+                onDequeue: (index: number) => this.dequeueAt(index),
+                onSendNow: () => this.sendQueuedNow(),
                 onOpenFile: (ref: FileRef) => this.openFile(ref),
                 onResolveFile: (ref: FileRef) => this.resolveFile(ref),
                 onForeignProject: (resolved: string) => this.foreignProjectOf(resolved),
@@ -1983,6 +2147,8 @@ struct Index {
                 showSessionsEntry: true,
                 shareText: this.shareText,
                 attachPaths: this.attachPaths,
+                queued: this.queuedTexts(),
+                todos: this.todos,
                 onSend: (text: string, attachPaths: string[]) => {
                   void this.send(text, attachPaths)
                 },
@@ -2004,6 +2170,8 @@ struct Index {
                   this.showModelSheet = true
                 },
                 onStop: () => this.stopAcp(),
+                onDequeue: (index: number) => this.dequeueAt(index),
+                onSendNow: () => this.sendQueuedNow(),
                 onOpenFile: (ref: FileRef) => this.openFile(ref),
                 onResolveFile: (ref: FileRef) => this.resolveFile(ref),
                 onForeignProject: (resolved: string) => this.foreignProjectOf(resolved),

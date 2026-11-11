@@ -41,6 +41,10 @@ export struct SessionRail {
   /** Session row under the finger; drives the pressed scale feedback. */
   @State pressedSessionId: string = ''
   @State newPressed: boolean = false
+  /** Session title filter; empty means "no filter", not "nothing matches". */
+  @State sessionQuery: string = ''
+  /** True while the search field holds focus; drives the 1vp highlight ring. */
+  @State searchFocused: boolean = false
 
   private label(at: number): string {
     const date = new Date(at)
@@ -57,6 +61,30 @@ export struct SessionRail {
 
   private isBound(project: ProjectSummary): boolean {
     return project.boundPath !== undefined && project.boundPath.length > 0
+  }
+
+  /**
+   * Case-insensitive title substring filter for the session list.
+   *
+   * Blank (or whitespace-only) input returns the whole list: an empty query is
+   * "no filter", never "nothing matches". Derived on every render instead of
+   * cached in @State because the source is a parent @Prop — a cached copy goes
+   * stale when a row is renamed or the project switches, and walking a rail
+   * this short is cheaper than keeping two lists in sync.
+   */
+  private visibleSessions(): SessionSummary[] {
+    const query = this.sessionQuery.trim().toLowerCase()
+    if (query.length === 0) {
+      return this.sessions
+    }
+    const out: SessionSummary[] = []
+    for (let i = 0; i < this.sessions.length; i++) {
+      const row: SessionSummary = this.sessions[i]
+      if (row.title.toLowerCase().indexOf(query) >= 0) {
+        out.push(row)
+      }
+    }
+    return out
   }
 
   private startCreate(): void {
@@ -289,8 +317,87 @@ export struct SessionRail {
       .width('100%')
       .padding({ left: 16, right: 12, top: 12, bottom: 8 })
 
+      // Search sits under the title row, above the list. Hidden while there
+      // are no sessions at all: a search box over an empty rail is one more
+      // line of chrome that can never return a result.
+      if (this.sessions.length > 0) {
+        Column() {
+          Row({ space: 6 }) {
+            SymbolGlyph($r('sys.symbol.magnifyingglass'))
+              .fontSize(16)
+              .fontColor([$r('app.color.text_tertiary')])
+
+            TextInput({ text: this.sessionQuery, placeholder: '搜索会话' })
+              .fontSize(13)
+              .fontColor($r('app.color.text_primary'))
+              .placeholderFont({ size: 13 })
+              .placeholderColor($r('app.color.text_tertiary'))
+              .height(34)
+              .layoutWeight(1)
+              // The field is a bare text line inside the pill: the surface and
+              // the rounding belong to the row below, so the input must not
+              // paint its own background or eat padding the row already gives.
+              .backgroundColor(Color.Transparent)
+              .padding({ left: 0, right: 0 })
+              .onChange((value: string) => {
+                this.sessionQuery = value
+              })
+              .onFocus(() => {
+                this.searchFocused = true
+              })
+              .onBlur(() => {
+                this.searchFocused = false
+              })
+
+            if (this.sessionQuery.length > 0) {
+              // 28vp tap box around a 16vp glyph: the visible icon stays small
+              // so it does not crowd the text, the thumb target does not.
+              Row() {
+                SymbolGlyph($r('sys.symbol.xmark_circle_fill'))
+                  .fontSize(16)
+                  .fontColor([$r('app.color.text_tertiary')])
+              }
+              .width(28)
+              .height(28)
+              .justifyContent(FlexAlign.Center)
+              .onClick(() => {
+                this.sessionQuery = ''
+              })
+            }
+          }
+          .width('100%')
+          // 38vp, not the 34vp of the field itself: the extra 4vp is thumb
+          // reach, and 34 + 2vp vertical breathing keeps 13fp text off the rim.
+          .height(38)
+          .padding({ left: 10, right: 4 })
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius(10)
+          // The ring is always 1vp wide and only its colour changes; a width
+          // that appeared on focus would shift the text 1vp and read as a jump.
+          .border({ width: 1, color: this.searchFocused ? 'rgba(77,107,254,0.45)' : Color.Transparent })
+          // Deliberately scoped to the border above: nothing else on this row
+          // ever changes, so nothing else is animated (no "transition: all").
+          .animation({ duration: 160, curve: Curve.EaseOut })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 12, bottom: 6 })
+      }
+
       List() {
-        ForEach(this.sessions, (row: SessionSummary) => {
+        // The empty state lives inside the list so it lands exactly where the
+        // rows would be; the List itself stays, otherwise the rail's flex
+        // height would collapse when the filter matches nothing.
+        if (this.sessions.length > 0 && this.visibleSessions().length === 0) {
+          ListItem() {
+            Text('没有匹配的会话')
+              .fontSize(13)
+              .fontColor($r('app.color.text_tertiary'))
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .padding({ left: 12, right: 12, top: 14, bottom: 14 })
+          }
+        }
+        ForEach(this.visibleSessions(), (row: SessionSummary) => {
           ListItem() {
             if (this.renamingSessionId === row.id) {
               Row({ space: 8 }) {

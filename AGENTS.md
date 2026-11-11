@@ -141,6 +141,10 @@ ACP 实测契约（勿凭直觉改）：
   `approval/policy`；切档需重启 App（env 启动期）且只影响新会话。
 - **完全不答审批 → turn 无限挂起**（failopen 探针实测 10+ 分钟无决定、文件不落盘），
   非工具 failed；服务端无自动放行。
+- **跑动中不能发第二条 prompt**：`session/prompt` 在 inflight 时被服务端拒绝
+  （`a prompt is already in flight for this session`，`packages/acp/acp/src/session.ts`），
+  ACP 没有 steering 通道 ⇒ **「插话」在 ACP 下不可得**，客户端只能排队、回合结束
+  （含 `session/cancel` 触发的 `cancelled`）后续发。别按 dsh-go 的 Web API 语义实现插话。
 - 该 profile 下 `bash` 工具存在但必然失败（无 exec），属平台限制。
 
 ## 5. 平台硬约束（六条，各有对策）
@@ -167,6 +171,14 @@ ACP 实测契约（勿凭直觉改）：
 
 - 已交付并真机验证：冷启动恢复、会话 resume、文件预览（网页/图片/文本）、能力开关、
   项目分类（创建/切换真机验证，每项目独立 workspace）。
+- **聊天体验对齐 dsh-go（2026-11-12，纯客户端，无协议改动）**：①**插话队列**——跑动中发送
+  改为入队（`Index.queued` + `flushQueue()`），输入框上方排队条可单条撤回，「立即发送」先
+  `session/cancel` 再续发（ACP 无 steering，见 §4.2）；②**待办条**——`todo_write` 参数投影成
+  `TodoItem[]`（`model/TodoModel.ets`），常驻输入框上方，冷启动/切会话按持久化轨迹
+  `refreshTodos()` 重建，不依赖服务端投影通道；③**上下文小环**——从 `usage_update` 的
+  「上下文 used/size」注记算占用率（70%/90% 两档变色），点开 toast 给精确值；④**引用追问**
+  ——长按消息 ›「引用到输入框」生成 `>` 引用块；⑤**会话搜索**——会话栏顶部按标题过滤。
+  本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 30 文件 + LocalUnit 40.6% 行覆盖）。
 - **in-process PTC 运行时已交付并真机闭环（2026-10-27，P1①）**：
   `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
   `dsh-bundle-ohos` patch 禁 stock `ptc-runtime`；`tools` 行现为 `mode: native`
@@ -327,6 +339,7 @@ ACP 实测契约（勿凭直觉改）：
 | `docs/BUILD.md` | 构建、签名、装机、排障（含受限环境坑） |
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
 | `docs/PLUGIN-MIGRATION.md` | 客户端插件迁移分级（P0/P1/P2/不迁） |
+| `docs/DSH-GO-PARITY.md` | 与 dsh-go（Android 同类客户端）的能力对齐矩阵：现状 × 可行性 A/B/C × 结论；含 ACP 协议边界（无 steering、无投影通道）与「不适用」硬边界 |
 | `docs/PERSONAL-AGENT.md` | 个人 Agent 与卡片演进方案（Agent Pack / CardSpec / 与 Muse 对比）。**§3–§6 的「垂域卡片做进外壳」方向已停**，文首有 2026-11-12 勘误；保留的是可复用的分析（Muse 对比、度量指标、风险表） |
 | 垂域仓（不在本仓） | <https://github.com/QtePP/Harmony-harness-game>（私有）。游戏的三层——裁判引擎 `@ohos/dsh-sanguo`、棋盘 `SanguoBoard*`、五个 agent pack——都在那边。**本仓不引用它们**：外壳只提供会话/文件/审批/设置，不认识任何垂域概念 |
 | `.workbuddy-ai/memory/` | 本地会话记忆（gitignored，不提交） |

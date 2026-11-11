@@ -6,6 +6,7 @@ import { ChatMessage, Role, ToolTrace } from '../model/ChatModel'
 import { attachmentNote, stagedImageHint, thumbnailLabel } from '../common/AttachmentCopy'
 import { NodeKind, kindAccent, kindGlyph, kindTint, kindVerb, statusLabel, toolKindOf } from '../common/TimelineNode'
 import { isWriteTool } from '../model/Rollback'
+import { TodoItem, completedCount, todoSummary } from '../model/TodoModel'
 import { MdText, copyTextToClipboard } from './Markdown'
 
 /** One text or code segment produced by the minimal Markdown splitter. */
@@ -878,6 +879,8 @@ export struct MessageItem {
   /** Long-press menu actions; the shell owns the transcript and the files. */
   onRollback: (messageId: string) => void = () => {}
   onFork: (messageId: string) => void = () => {}
+  /** Quote block for the composer; the draft lives one level up. */
+  onQuote: (quote: string) => void = () => {}
   private previewController: webview.WebviewController = new webview.WebviewController()
 
   aboutToAppear(): void {
@@ -1609,6 +1612,33 @@ export struct MessageItem {
   }
 
   /**
+   * Quote this message into the composer as a `>` block.
+   *
+   * The desktop conversation dock sends quotes as a quoted block above the
+   * prompt; on the phone the same idea is a prefix in the draft, because the
+   * model reads it identically and the user keeps editing rights. Six lines
+   * and 400 characters anchor a follow-up without dragging a whole answer in.
+   * The composer owns the draft, so the row hands the block up rather than
+   * reaching across components.
+   */
+  private quoteMessage(): void {
+    const lines = this.message.text.split('\n')
+    const kept: string[] = []
+    let used = 0
+    for (const line of lines) {
+      if (kept.length >= 6 || used >= 400) {
+        break
+      }
+      const flat = line.trim()
+      kept.push(`> ${flat}`)
+      used += flat.length
+    }
+    if (kept.length > 0) {
+      this.onQuote(kept.join('\n'))
+    }
+  }
+
+  /**
    * Long-press menu: copy the text, fork a new branch here, or roll the
    * transcript (and the files the turn wrote) back to before this message.
    * Rollback is destructive, so it asks first.
@@ -1632,6 +1662,10 @@ export struct MessageItem {
         {
           title: '复制全文',
           action: () => this.copyMessage()
+        },
+        {
+          title: '引用到输入框',
+          action: () => this.quoteMessage()
         },
         {
           title: '从此处分支（保留原会话）',
@@ -1806,6 +1840,12 @@ export struct ChatView {
   /** Share prefill pushed by the shell; absorbed into the draft once. */
   @Prop @Watch('onShareText') shareText: string = ''
   @Prop attachPaths: string[] = []
+  /** Turns the user typed while a run was live, waiting for it to settle. */
+  @Prop queued: string[] = []
+  /** The model's standing plan, projected from its latest `todo_write`. */
+  @Prop todos: TodoItem[] = []
+  /** Collapsed by default: the bar names the current step, the list is one tap away. */
+  @State todoExpanded: boolean = false
   /** Phones have no rail: show a top-bar entry that opens the sessions sheet. */
   showSessionsEntry: boolean = false
   onSend: (text: string, attachPaths: string[]) => void = () => {}
@@ -1820,9 +1860,18 @@ export struct ChatView {
   onForeignProject: (resolved: string) => string = () => ''
   onPickModel: () => void = () => {}
   onStop: () => void = () => {}
-  /** Send is allowed only with content staged and no turn in flight. */
+  /** Drop one queued turn before it is sent (index into `queued`). */
+  onDequeue: (index: number) => void = () => {}
+  /** Cut the running turn short so the queue goes out now. */
+  onSendNow: () => void = () => {}
+  /**
+   * Send is allowed whenever there is something to send. A live turn no longer
+   * blocks the composer: the tap queues the message and the shell sends it the
+   * moment the run settles, which is the only steering ACP permits (a second
+   * `session/prompt` on a running session is rejected by the server).
+   */
   private canSend(): boolean {
-    return !this.running && (this.draft.trim().length > 0 || this.attachPaths.length > 0)
+    return this.draft.trim().length > 0 || this.attachPaths.length > 0
   }
 
   /** Long-press menu actions, forwarded from the shell. */
@@ -2090,6 +2139,260 @@ export struct ChatView {
     }
   }
 
+  /**
+   * The plan bar above the composer.
+   *
+   * dsh keeps a todo list on the server and the desktop UI paints it as a
+   * persistent strip; on the phone the same list is rebuilt from the model's
+   * last `todo_write`, so the bar costs no protocol work and survives a cold
+   * start. Collapsed it is one line — progress plus the step being worked on —
+   * because a plan is orientation, not content: it should be readable without
+   * taking a third of the screen away from the conversation.
+   */
+  @Builder
+  todoDock() {
+    if (this.todos.length > 0) {
+      Column({ space: 6 }) {
+        Row({ space: 8 }) {
+          Text('待办')
+            .fontSize(11)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_tertiary'))
+            .letterSpacing(0.5)
+            .flexShrink(0)
+
+          Text(todoSummary(this.todos))
+            .fontSize(12)
+            .fontColor(this.todoDone() ? $r('app.color.status_success') : $r('app.color.text_secondary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+
+          SymbolGlyph($r('sys.symbol.chevron_down'))
+            .fontSize(12)
+            .fontColor([$r('app.color.text_tertiary')])
+            .rotate({ angle: this.todoExpanded ? 0 : -90 })
+            .animation({ curve: curves.springMotion(0.35, 0.85) })
+            .flexShrink(0)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+            this.todoExpanded = !this.todoExpanded
+          })
+        })
+
+        if (this.todoExpanded) {
+          Column({ space: 5 }) {
+            ForEach(this.todos, (item: TodoItem, index: number) => {
+              Row({ space: 8 }) {
+                // Text glyphs, not symbol resources: the three states are the
+                // whole meaning of the row, and a missing symbol name would
+                // fail the build rather than degrade.
+                Text(item.status === 'completed' ? '✓' : (item.status === 'in_progress' ? '●' : '○'))
+                  .fontSize(11)
+                  .width(12)
+                  .textAlign(TextAlign.Center)
+                  .fontColor(this.todoColor(item.status))
+                Text(item.content)
+                  .fontSize(12)
+                  .lineHeight(17)
+                  .fontColor(item.status === 'completed' ?
+                    $r('app.color.text_tertiary') : $r('app.color.text_secondary'))
+                  .decoration({
+                    type: item.status === 'completed' ?
+                      TextDecorationType.LineThrough : TextDecorationType.None,
+                    color: $r('app.color.text_tertiary')
+                  })
+                  .layoutWeight(1)
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Top)
+            }, (item: TodoItem, index: number) => `${index}.${item.status}.${item.content}`)
+          }
+          .width('100%')
+          .padding({ top: 2 })
+          .transition(TransitionEffect.OPACITY
+            .combine(TransitionEffect.translate({ y: -4 }))
+            .animation({ duration: 180, curve: Curve.EaseOut }))
+        }
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .backgroundColor($r('app.color.surface'))
+      .borderRadius(12)
+      .transition(TransitionEffect.OPACITY
+        .combine(TransitionEffect.translate({ y: 6 }))
+        .animation({ duration: 220, curve: Curve.EaseOut }))
+    }
+  }
+
+  private todoDone(): boolean {
+    return this.todos.length > 0 && completedCount(this.todos) === this.todos.length
+  }
+
+  /**
+   * Latest context occupancy, read back from the usage note the runtime puts
+   * on each answer (`上下文 used/size`). Returns [used, size]; [0, 0] means the
+   * runtime has not reported one yet, and the ring stays hidden rather than
+   * showing an empty gauge that looks like zero usage.
+   */
+  private contextUsage(): number[] {
+    for (let index = this.messages.length - 1; index >= 0; index--) {
+      const note = this.messages[index].note
+      if (!note.startsWith('上下文 ')) {
+        continue
+      }
+      const rest = note.substring('上下文 '.length)
+      const slash = rest.indexOf('/')
+      if (slash <= 0) {
+        continue
+      }
+      const used = Number(rest.substring(0, slash))
+      const size = Number(rest.substring(slash + 1))
+      if (!Number.isNaN(used) && !Number.isNaN(size) && size > 0) {
+        return [used, size]
+      }
+    }
+    return [0, 0]
+  }
+
+  /** 「12k/128k · 9%」 — compact enough for a toast, precise enough to act on. */
+  private contextLabel(used: number, size: number): string {
+    const ratio = Math.min(100, Math.round((used / size) * 100))
+    return `上下文 ${this.compactTokens(used)}/${this.compactTokens(size)} · ${ratio}%`
+  }
+
+  private compactTokens(value: number): string {
+    if (value >= 1000000) {
+      return `${(value / 1000000).toFixed(1)}M`
+    }
+    if (value >= 1000) {
+      return `${Math.round(value / 1000)}k`
+    }
+    return `${value}`
+  }
+
+  private contextPercent(): number {
+    const usage = this.contextUsage()
+    return usage[1] > 0 ? Math.min(100, Math.round((usage[0] / usage[1]) * 100)) : 0
+  }
+
+  private contextReady(): boolean {
+    return this.contextUsage()[1] > 0
+  }
+
+  /**
+   * The context gauge beside the send button.
+   *
+   * A phone cannot afford the desktop's separate stats row, and "how full is
+   * the window" is the one number that changes what the user does next
+   * (compact, fork, or start over). A 22vp ring carries it without taking a
+   * line; the exact figures live in the toast, which is also where a misread
+   * ring can be corrected.
+   */
+  @Builder
+  contextRing() {
+    if (this.contextReady()) {
+      Stack() {
+        Progress({ value: this.contextPercent(), total: 100, type: ProgressType.Ring })
+          .width(20)
+          .height(20)
+          .color(this.contextPercent() >= 90 ? $r('app.color.status_danger')
+            : (this.contextPercent() >= 70 ? '#E08A3C' : $r('app.color.brand')))
+          .backgroundColor($r('app.color.surface_muted'))
+          .style({ strokeWidth: 3 })
+      }
+      .width(34)
+      .height(34)
+      .onClick(() => {
+        const usage = this.contextUsage()
+        this.getUIContext().getPromptAction().showToast({
+          message: this.contextLabel(usage[0], usage[1]),
+          duration: 2000
+        })
+      })
+    }
+  }
+
+  private todoColor(status: string): ResourceColor {
+    if (status === 'completed') {
+      return $r('app.color.status_success')
+    }
+    return status === 'in_progress' ? $r('app.color.brand') : $r('app.color.text_tertiary')
+  }
+
+  /**
+   * The queue strip above the composer.
+   *
+   * A message typed during a run is not rejected any more: it waits here, in
+   * the user's sight, and goes out when the turn settles. Naming the rule
+   * ("本轮结束后自动发送") once at the top is what keeps the strip from looking
+   * like a second draft box; each row can be dropped individually because a
+   * queued thought is often stale by the time the run ends.
+   */
+  @Builder
+  queueStrip() {
+    if (this.queued.length > 0) {
+      Column({ space: 6 }) {
+        Row({ space: 8 }) {
+          Text(`排队 ${this.queued.length} 条 · 本轮结束后自动发送`)
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+            .layoutWeight(1)
+
+          if (this.running) {
+            // Interrupting is a deliberate act with a cost — the running turn
+            // ends where it is — so it is offered here, next to the queue it
+            // affects, instead of being folded into the stop button.
+            Text('立即发送')
+              .fontSize(11)
+              .fontColor($r('app.color.brand'))
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .borderRadius(8)
+              .backgroundColor($r('app.color.surface_muted'))
+              .onClick(() => this.onSendNow())
+          }
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        ForEach(this.queued, (text: string, index: number) => {
+          Row({ space: 8 }) {
+            Text(text)
+              .fontSize(12)
+              .fontColor($r('app.color.text_secondary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+
+            Text('×')
+              .fontSize(15)
+              .fontColor($r('app.color.text_tertiary'))
+              .width(28)
+              .height(28)
+              .textAlign(TextAlign.Center)
+              .borderRadius(14)
+              .onClick(() => this.onDequeue(index))
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+          .padding({ left: 10, right: 2, top: 2, bottom: 2 })
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius(10)
+        }, (text: string, index: number) => `${index}.${text.length}`)
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .backgroundColor($r('app.color.surface'))
+      .borderRadius(12)
+      .transition(TransitionEffect.OPACITY
+        .combine(TransitionEffect.translate({ y: 6 }))
+        .animation({ duration: 220, curve: Curve.EaseOut }))
+    }
+  }
+
   build() {
     Stack() {
       Column() {
@@ -2214,7 +2517,10 @@ export struct ChatView {
                   onResolveFile: this.onResolveFile,
                   onForeignProject: this.onForeignProject,
                   onRollback: this.onRollback,
-                  onFork: this.onFork
+                  onFork: this.onFork,
+                  onQuote: (quote: string) => {
+                    this.draft = this.draft.length > 0 ? `${quote}\n\n${this.draft}` : `${quote}\n\n`
+                  }
                 })
               }
             }, (item: ChatMessage) => item.id)
@@ -2266,6 +2572,10 @@ export struct ChatView {
             .combine(TransitionEffect.translate({ y: 10 }))
             .animation({ duration: 220, curve: Curve.EaseOut }))
         }
+
+        this.todoDock()
+
+        this.queueStrip()
 
         if (this.attachPaths.length > 0) {
           Column({ space: 8 }) {
@@ -2399,12 +2709,15 @@ export struct ChatView {
           }
           .layoutWeight(1)
 
-          Button('发送', { type: ButtonType.Capsule })
+          this.contextRing()
+
+          Button(this.running ? '排队' : '发送', { type: ButtonType.Capsule })
             .height(44)
             .padding({ left: 8, right: 8 })
-            // Disabled while a turn is live: the server refuses a second prompt
-            // ("a prompt is already in flight"), so letting the tap through only
-            // produced an error message. `canSend` folds both conditions.
+            // A live turn changes what the tap means, not whether it works: the
+            // shell queues the message and sends it when the run settles (ACP
+            // refuses a second prompt on a running session). The label says so
+            // before the tap instead of after it.
             .backgroundColor(this.canSend() ?
               $r('app.color.brand') : $r('app.color.surface_muted'))
             .fontColor(this.canSend() ?
