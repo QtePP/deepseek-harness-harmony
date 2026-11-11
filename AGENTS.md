@@ -287,7 +287,15 @@ ACP 实测契约（勿凭直觉改）：
 4. **验证**：`devecocli log`（支持 `--crash` / `--level` / `--bundle-name` / `--tail` / `--follow`）；
    应用内 设置 → 诊断；无头 UI 断言用 `devecocli ui layout|screenshot|click|swipe|text`
    （封装好过手拼 `hdc shell uitest dumpLayout`，后者参数名跨版本变过）。
-   本地三段验证（装机前先过一遍，全绿再部署）：
+   本地三段验证（装机前先过一遍，全绿再部署）。**一条命令即可全跑**：
+   `bash scripts/test.sh`（= payload 单测 + ArkTS 检查 + LocalUnit + 设备端 ohosTest；
+   子集用 `unit` / `arkts` / `local` / `device` / `ui "<自然语言计划>"`）。
+   **两个坑写死在脚本里，手工跑时同样要小心**：
+   (1) `hvigorw test` 断言失败时**仍 exit 0**，失败只表现为日志里的
+   `ERROR: Error in <用例>` —— 不能靠退出码判断；
+   (2) 恢复 `build-profile.json5` **只能用 `git checkout`**，用文件备份会把已注入的
+   storePassword/keyPassword 写回受版本控制的文件。
+   以下是脚本内部各段的原始命令：
    - **单测**：必须在**载荷树内**跑——插件 `index.js` 依赖 `@deepseek-ai/schemastery` 等包，
      只有载荷根能解析，在仓库源目录直接跑会 `ERR_MODULE_NOT_FOUND`：
      `cd .build/payload/profile-ohos/profiles/ohos/node_modules/@ohos/dsh-tool-fs-search-js && node --test test/*.test.mjs`（38/38）；
