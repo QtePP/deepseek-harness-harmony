@@ -7,6 +7,10 @@
 
 ### 新增
 
+- **桌面快捷方式「新对话」**：`shortcuts.json` + `ohos.ability.shortcuts` 元数据，want 携带
+  `shortcutId`；`EntryAbility` 经 `AppStorage` 把请求交给页面，冷启动与 `onNewWant` 都能开新会话
+  （已用 `aa start --ps shortcutId new_chat` 验证打开的是「新会话」）。**桌面长按菜单里没显示该
+  快捷方式**：启动器缓存/版本行为，未深究；功能路径本身已通。
 - **外观三档**：设置 › 外观（跟随系统 / 浅色 / 深色），选择持久化、**启动期生效**。
   暗色补齐了缺失的 4 个色 token（`code_header`、`code_border`、`status_success`、
   `status_danger`），暗色下代码块、状态色不再回落到浅色值。

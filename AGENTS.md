@@ -202,6 +202,9 @@ ACP 实测契约（勿凭直觉改）：
   **外观三档（跟随系统/浅色/深色）已真机验成**：浅色与深色均重启后保持；**暗色必须在启动期应用**
   ——运行中 `setColorMode` 会重建窗口并让 ArkUI 树变黑屏（真机实测），因此 `EntryAbility.onCreate`
   用 `getPreferencesSync` 先读 `appearance` 再 `loadContent`，设置页只落盘 + 提示重启。
+  **桌面快捷方式「新对话」**：`shortcuts.json`（profile）+ `ohos.ability.shortcuts` 元数据 +
+  `AppStorage['pendingShortcut']` 交给页面；`aa start --ps shortcutId new_chat` 实测打开「新会话」。
+  桌面长按菜单未显示该条目（启动器行为），功能路径已验证。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。

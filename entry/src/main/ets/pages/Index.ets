@@ -147,6 +147,8 @@ struct Index {
   @State queued: QueuedTurn[] = []
   /** The model's standing plan, projected from its latest `todo_write`. */
   @State todos: TodoItem[] = []
+  /** Launcher shortcut id delivered through the want; consumed once. */
+  @StorageLink('pendingShortcut') @Watch('onShortcutRequest') pendingShortcut: string = ''
   /** Standing objective, projected from the goal tools (read-only bar). */
   @State goalObjective: string = ''
   @State goalStatus: string = ''
@@ -287,6 +289,25 @@ struct Index {
     // persisted conversation opens one immediately so the first prompt and
     // the model picker have a live session to target.
     await this.ensureAcpCurrentSession()
+    this.onShortcutRequest()
+  }
+
+  /**
+   * A launcher shortcut asked for a fresh conversation.
+   *
+   * AppStorage carries the request so it works both on a cold start (the want
+   * lands before the page exists) and on `onNewWant` while the app is already
+   * open; the id is cleared first so a rebuild cannot act on it twice.
+   */
+  private onShortcutRequest(): void {
+    const id = this.pendingShortcut
+    if (id.length === 0) {
+      return
+    }
+    this.pendingShortcut = ''
+    if (id === 'new_chat' && this.phase === BootPhase.READY) {
+      void this.newSession()
+    }
   }
 
   /** Cold start / project switch: open the most recent conversation of the current project. */

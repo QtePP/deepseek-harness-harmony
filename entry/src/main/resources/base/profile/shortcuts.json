@@ -1,0 +1,19 @@
+{
+  "shortcuts": [
+    {
+      "shortcutId": "new_chat",
+      "label": "新对话",
+      "icon": "$media:startIcon",
+      "wants": [
+        {
+          "bundleName": "com.qtepp.taharness",
+          "moduleName": "entry",
+          "abilityName": "EntryAbility",
+          "parameters": {
+            "shortcutId": "new_chat"
+          }
+        }
+      ]
+    }
+  ]
+}

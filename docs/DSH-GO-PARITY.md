@@ -112,7 +112,7 @@
 | **网页版切换**：原生 / 网页一键切换、同一对话、手机布局注入 | **无** | **C**：本仓定位是「不套壳浏览器」；设备上也没有 `dsh web` 监听端口（只有 4517 桥） | **不适用** |
 | 系统通知（完成 / 出错 / 等你确认 / 提问，点开直达） | **有**（本轮）：`common/Notify.ets`，后台时一轮完成 / 出错 / 待审批各发一条本地通知，前台不发，首次用才要授权；暂无「点开直达」wantAgent | A：`NotificationKit` 本地通知 + 已有 `session/status`、`request_permission` 事件 | **本轮已落地**（通知）；直达后置 |
 | 系统分享进来（文字 / 图片 → 新对话） | **有**：`ShareInbox`（冷启 `onCreate` / 热启 `onNewWant`，图片先拷进沙箱） | — | 已有 |
-| 桌面快捷方式 / 快速设置磁贴 | **无** | B：`shortcuts` 配置 + 快捷方式 API | 建议下一轮（低优先） |
+| 桌面快捷方式 / 快速设置磁贴 | **部分**（本轮补桌面快捷方式）：`shortcuts.json` + `ohos.ability.shortcuts` 元数据，want 的 `shortcutId` 经 `AppStorage` 交给页面，冷启动与 `onNewWant` 都开新会话（`aa start --ps shortcutId new_chat` 实测打开「新会话」）。**桌面长按菜单未显示该条目**（启动器行为，未深究）；快速设置磁贴未做 | A：`shortcuts` profile + want 参数 | **本轮已落地**（want 路径）；启动器显示待查 |
 | 应用内更新（GitHub Releases + SHA-256 + PackageInstaller） | **无** | **C**：鸿蒙走 AGC 分发，没有 APK 侧载等价路径；本仓发布包只能经 AGC | **不适用** |
 | DS Bot / 社区 / 论坛 | **无** | **C**：服务端 + 插件生态，与外壳定位无关 | **不适用** |
 
@@ -281,6 +281,7 @@
 | 主题色 | 通过：琥珀即时生效、重启后保持（设置页「保存」按钮已改为跟色） |
 | 重新回答 | 通过：新会话「· 重答」、原会话保留（首版标题被覆盖、多一条服务端提示，已修） |
 | 长按菜单 | 通过：复制 / 引用 / 分支 / 重答 / 回撤 |
+| 桌面快捷方式「新对话」 | 通过（want 注入）：`aa start --ps shortcutId new_chat` 打开「新会话」；桌面长按菜单未显示条目 |
 | 外观三档 | 通过：浅色 / 深色各自重启后保持；**运行中切色会黑屏**，故只在启动期应用（已按此实现） |
 | 通知 | **未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 不弹框也不改状态；需在系统设置手动开启后再验 |
 

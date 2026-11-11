@@ -16,14 +16,32 @@ export default class EntryAbility extends UIAbility {
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
+    this.captureShortcut(want);
     // Share targets arrive through the want; plain launches reject inside.
     void ShareInbox.handleWant(want, this.context);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.captureShortcut(want);
     void ShareInbox.handleWant(want, this.context);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onNewWant');
+  }
+
+  /**
+   * A launcher shortcut carries its id in the want. Publishing it through
+   * AppStorage lets the page react even when the ability was already running
+   * (onNewWant), instead of only on a cold start.
+   */
+  private captureShortcut(want: Want): void {
+    const params = want.parameters;
+    if (params === undefined) {
+      return;
+    }
+    const id = params['shortcutId'];
+    if (typeof id === 'string' && id.length > 0) {
+      AppStorage.setOrCreate('pendingShortcut', id);
+    }
   }
 
   onDestroy(): void {
