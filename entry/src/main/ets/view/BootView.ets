@@ -4,6 +4,9 @@ import { BootPhase } from '../host/NodeHost'
 /** Splash / failure surface shown until the runtime answers. */
 @Component
 export struct BootView {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @Prop @Watch('onPhaseChanged') phase: BootPhase = BootPhase.IDLE
   @Prop detail: string = ''
   @Prop diagnostics: string = ''
@@ -151,7 +154,7 @@ export struct BootView {
             .width(24)
             .height(24)
             .objectFit(ImageFit.Contain)
-            .fillColor($r('app.color.brand'))
+            .fillColor(this.accent)
             .opacity(this.orbPhase === 0 ? 1 : 0.7)
             .scale({
               x: this.orbPhase === 0 ? 1 : 0.92,

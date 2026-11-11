@@ -12,6 +12,9 @@ import { ProjectStore, ProjectSummary } from '../model/ProjectModel'
  */
 @Component
 export struct SessionRail {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @Prop sessions: SessionSummary[] = []
   @Prop currentId: string = ''
   @Prop projects: ProjectSummary[] = []
@@ -205,7 +208,7 @@ export struct SessionRail {
           .fontSize(12)
           .height(30)
           .layoutWeight(1)
-          .backgroundColor($r('app.color.brand'))
+          .backgroundColor(this.accent)
           .onClick(() => this.startSessionRename(row))
         Button('删除')
           .fontSize(12)
@@ -233,7 +236,7 @@ export struct SessionRail {
                 if (this.isBound(project)) {
                   SymbolGlyph($r('sys.symbol.folder_fill'))
                     .fontSize(12)
-                    .fontColor([this.isCurrentProject(project.id) ? Color.White : $r('app.color.brand')])
+                    .fontColor([this.isCurrentProject(project.id) ? Color.White : this.accent])
                 }
                 Text(project.name)
                   .fontSize(12)
@@ -243,7 +246,7 @@ export struct SessionRail {
               }
               .padding({ left: 10, right: 10, top: 6, bottom: 6 })
               .backgroundColor(this.isCurrentProject(project.id)
-                ? $r('app.color.brand')
+                ? this.accent
                 : $r('app.color.surface_muted'))
               .borderRadius(14)
               .onClick(() => this.onSelectProject(project.id))
@@ -281,7 +284,7 @@ export struct SessionRail {
           Button('确定')
             .fontSize(13)
             .height(34)
-            .backgroundColor($r('app.color.brand'))
+            .backgroundColor(this.accent)
             .onClick(() => this.confirmNaming())
 
           Button('取消')
@@ -302,7 +305,7 @@ export struct SessionRail {
           .layoutWeight(1)
         SymbolGlyph($r('sys.symbol.plus_circle_fill'))
           .fontSize(30)
-          .fontColor([$r('app.color.brand')])
+          .fontColor([this.accent])
           .scale({ x: this.newPressed ? 0.88 : 1, y: this.newPressed ? 0.88 : 1 })
           .animation({ duration: 120, curve: Curve.EaseOut })
           .onTouch((event: TouchEvent) => {
@@ -417,7 +420,7 @@ export struct SessionRail {
                 Button('确定')
                   .fontSize(13)
                   .height(34)
-                  .backgroundColor($r('app.color.brand'))
+                  .backgroundColor(this.accent)
                   .onClick(() => this.confirmSessionRename())
 
                 Button('取消')
@@ -440,7 +443,7 @@ export struct SessionRail {
                     .height(30)
                     .borderRadius(2)
                     .backgroundColor(row.id === this.currentId ?
-                      $r('app.color.brand') : Color.Transparent)
+                      this.accent : Color.Transparent)
 
                   Column({ space: 2 }) {
                     Text(row.title)

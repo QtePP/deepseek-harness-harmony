@@ -17,7 +17,9 @@ import { ShareInbox } from '../model/ShareInbox'
 import { FileTouch, RollbackReport, SnapshotStore, writePathsOf } from '../model/Rollback'
 import { TodoItem, isTodoTool, todosFromJson, todosFromRaw } from '../model/TodoModel'
 import { GoalState, goalFromJson, goalFromRaw, isGoalTool } from '../model/GoalModel'
+import { exportFileName, transcriptMarkdown } from '../model/Export'
 import { Notify } from '../common/Notify'
+import { listWorkspaceFiles, matchWorkspaceFiles } from '../common/WorkspaceFiles'
 import { EventLike, LinkState, SessionEventPayload, SessionStatusPayload } from '../model/Protocol'
 import {
   AcpConfigOption, AcpContentBlock, AcpModelChoice, AcpPermissionRequest, AcpSessionNewResult,
@@ -110,6 +112,9 @@ interface QueuedTurn {
 @Entry
 @Component
 struct Index {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @State phase: BootPhase = BootPhase.IDLE
   @State detail: string = ''
   @State messages: ChatMessage[] = []
@@ -178,6 +183,10 @@ struct Index {
   private redispatchDisconnect: string = ''
   /** Pre-turn file snapshots, keyed by turn key (see Rollback.ets). */
   private snapshots: SnapshotStore = new SnapshotStore()
+  /** Workspace file index for the composer's `@` picker, rebuilt on a TTL. */
+  private workspaceFileIndex: string[] = []
+  private workspaceFileIndexAt: number = 0
+  private workspaceFileIndexRoot: string = ''
   /** Files each rollback-able turn touched, keyed by turn key. */
   private turnTouches: Map<string, FileTouch[]> = new Map<string, FileTouch[]>()
   /** The turn currently accepting touches; '' when no turn is running. */
@@ -895,6 +904,63 @@ struct Index {
         }
       }
     }
+  }
+
+  /**
+   * Write the open conversation into the project workspace as Markdown.
+   *
+   * ACP has no `session/export`, so the transcript the app already holds is the
+   * only thing it can honestly export. Putting the file in the workspace makes
+   * it reachable from the files panel and from the agent in later turns.
+   */
+  private async exportConversation(): Promise<void> {
+    if (this.messages.length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '当前会话还没有内容', duration: 2000 })
+      return
+    }
+    const root = this.workspaceOf(this.currentProjectId)
+    const dir = `${root}/exports`
+    const name = exportFileName(this.title, new Date())
+    const path = `${dir}/${name}`
+    try {
+      if (!fs.accessSync(dir)) {
+        fs.mkdirSync(dir)
+      }
+      const text = transcriptMarkdown(this.messages, this.title, new Date())
+      const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC)
+      try {
+        fs.writeSync(file.fd, text)
+      } finally {
+        fs.closeSync(file)
+      }
+      this.getUIContext().getPromptAction().showToast({
+        message: `已导出到 exports/${name}`,
+        duration: 2600
+      })
+    } catch (error) {
+      this.getUIContext().getPromptAction().showToast({
+        message: `导出失败：${(error as Error).message}`,
+        duration: 2600
+      })
+    }
+  }
+
+  /**
+   * Files in the open project's workspace, filtered for the `@` picker.
+   *
+   * The index is cached for a few seconds: typing `@` should not walk the tree
+   * on every keystroke, but a file the agent just wrote should show up without
+   * a restart, so the cache is short rather than permanent.
+   */
+  private searchWorkspaceFiles(query: string): string[] {
+    const root = this.workspaceOf(this.currentProjectId)
+    const now = Date.now()
+    if (root !== this.workspaceFileIndexRoot || now - this.workspaceFileIndexAt > 4000) {
+      this.workspaceFileIndex = listWorkspaceFiles(root)
+      this.workspaceFileIndexRoot = root
+      this.workspaceFileIndexAt = now
+    }
+    return matchWorkspaceFiles(this.workspaceFileIndex, query, 8)
   }
 
   /** Queued texts in the shape the composer strip renders. */
@@ -1625,6 +1691,14 @@ struct Index {
   }
 
   /** Profile and approval tier are boot-time env; persisted for next launch. */
+  /** Accent switches are live: persist the id, republish the colour. */
+  private async saveAccentChoice(id: string): Promise<void> {
+    if (this.context === null) {
+      return
+    }
+    await AppConfig.saveAccent(this.context, id)
+  }
+
   private async saveProfileChoice(profile: string, permissionMode: string): Promise<void> {
     if (this.context === null) {
       return
@@ -2089,6 +2163,7 @@ struct Index {
       initialModel: AppConfig.model,
       initialProfile: AppConfig.profile,
       initialPermission: AppConfig.permissionMode,
+      initialAccent: AppConfig.accentId,
       diagnostics: this.diagnostics,
       pluginRows: this.pluginRows,
       onSave: (key: string, model: string) => {
@@ -2096,6 +2171,9 @@ struct Index {
       },
       onProfileChange: (profile: string, permissionMode: string) => {
         void this.saveProfileChoice(profile, permissionMode)
+      },
+      onAccentChange: (id: string) => {
+        void this.saveAccentChoice(id)
       },
       onRefreshDiagnostics: () => this.refreshDiagnostics(),
       onResetPayload: () => {
@@ -2262,6 +2340,13 @@ struct Index {
                 onStop: () => this.stopAcp(),
                 onDequeue: (index: number) => this.dequeueAt(index),
                 onSendNow: () => this.sendQueuedNow(),
+                onClearQueue: () => {
+                  this.queued = []
+                },
+                onExport: () => {
+                  void this.exportConversation()
+                },
+                onSearchFiles: (query: string) => this.searchWorkspaceFiles(query),
                 onRegenerate: (messageId: string) => {
                   void this.regenerate(messageId)
                 },
@@ -2453,7 +2538,7 @@ struct Index {
                     if (choice.value === this.currentModelValue) {
                       Text('当前')
                         .fontSize(11)
-                        .fontColor($r('app.color.brand'))
+                        .fontColor(this.accent)
                     }
                   }
                   .width('100%')

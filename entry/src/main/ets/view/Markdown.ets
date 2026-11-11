@@ -559,6 +559,9 @@ export function tokenize(code: string, lang: string): CodeToken[] {
 /** One block's inline content rendered as a styled Span tree. */
 @Component
 struct InlineText {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @Prop content: string = ''
   @Prop baseSize: number = 15
   @Prop lineH: number = 22
@@ -573,7 +576,7 @@ struct InlineText {
           .fontStyle(span.italic ? FontStyle.Italic : FontStyle.Normal)
           .decoration(span.strike ? { type: TextDecorationType.LineThrough } :
             (span.link.length > 0 ? { type: TextDecorationType.Underline } : { type: TextDecorationType.None }))
-          .fontColor(span.code || span.link.length > 0 ? $r('app.color.brand') :
+          .fontColor(span.code || span.link.length > 0 ? this.accent :
             (this.muted ? $r('app.color.text_secondary') : $r('app.color.text_primary')))
           .fontFamily(span.code ? 'monospace' : 'HarmonyOS Sans')
       }, (span: MdSpan, index: number) => `${index}.${span.text.length}.${span.bold}.${span.code}.${span.link.length}`)
@@ -607,6 +610,9 @@ struct CodeText {
 /** Renders one parsed Markdown block with the style of its kind. */
 @Component
 struct MdBlockView {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @Prop block: MdBlock = new MdBlock()
   /** HTML/SVG fenced blocks can be rendered live instead of shown as source. */
   @State previewing: boolean = false
@@ -753,7 +759,7 @@ struct MdBlockView {
             .fontColor($r('app.color.text_tertiary'))
           Text(this.showSource ? '预览' : '源码')
             .fontSize(11)
-            .fontColor($r('app.color.brand'))
+            .fontColor(this.accent)
             .padding({ left: 10, right: 10, top: 4, bottom: 4 })
             .backgroundColor($r('app.color.surface'))
             .borderRadius(8)
@@ -762,7 +768,7 @@ struct MdBlockView {
             })
           Text('复制')
             .fontSize(11)
-            .fontColor($r('app.color.brand'))
+            .fontColor(this.accent)
             .padding({ left: 10, right: 10, top: 4, bottom: 4 })
             .backgroundColor($r('app.color.surface'))
             .borderRadius(8)
@@ -809,7 +815,7 @@ struct MdBlockView {
             if (this.canPreview()) {
               Text(this.previewing ? '收起预览' : '预览')
                 .fontSize(11)
-                .fontColor($r('app.color.brand'))
+                .fontColor(this.accent)
                 .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                 .backgroundColor($r('app.color.surface'))
                 .borderRadius(7)
@@ -817,7 +823,7 @@ struct MdBlockView {
             }
             Text('复制')
               .fontSize(11)
-              .fontColor($r('app.color.brand'))
+              .fontColor(this.accent)
               .padding({ left: 10, right: 10, top: 4, bottom: 4 })
               .backgroundColor($r('app.color.surface'))
               .borderRadius(7)
@@ -877,7 +883,7 @@ struct MdBlockView {
         Column()
           .width(3)
           .borderRadius(2)
-          .backgroundColor($r('app.color.brand'))
+          .backgroundColor(this.accent)
           .alignSelf(ItemAlign.Stretch)
         InlineText({ content: this.block.text, baseSize: 14, lineH: 20, muted: true })
       }

@@ -75,6 +75,9 @@ function listChildren(dir: string): FileRow[] {
  */
 @Component
 export struct FilesPanel {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @Prop projectName: string = ''
   @Prop workspacePath: string = ''
   @Prop @Watch('onTick') refreshTick: number = 0
@@ -200,7 +203,7 @@ export struct FilesPanel {
 
                 SymbolGlyph(row.isDir ? $r('sys.symbol.folder_fill') : $r('sys.symbol.doc_text'))
                   .fontSize(16)
-                  .fontColor([row.isDir ? $r('app.color.brand') : $r('app.color.text_secondary')])
+                  .fontColor([row.isDir ? this.accent : $r('app.color.text_secondary')])
 
                 Text(row.name)
                   .fontSize(14)

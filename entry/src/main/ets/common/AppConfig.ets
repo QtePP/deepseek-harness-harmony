@@ -3,6 +3,7 @@ import { preferences } from '@kit.ArkData'
 import { util } from '@kit.ArkTS'
 import { BusinessError } from '@kit.BasicServicesKit'
 import { fileIo as fs } from '@kit.CoreFileKit'
+import { ACCENT_KEY, ACCENT_DEFAULT, accentOf, themeIdOf } from './Theme'
 
 interface SecretsFile {
   deepseekApiKey?: string
@@ -36,6 +37,8 @@ export class AppConfig {
 
   static apiKey: string = ''
   static model: string = AppConfig.MODEL
+  /** Accent theme id; the colour itself lives in AppStorage for the views. */
+  static accentId: string = 'blue'
   /** dsh profile for the next boot; SDK stays the default, ACP is opt-in. */
   static profile: string = AppConfig.PROFILE_SDK
   /** Approval tier surfaced to bootstrap as DSH_PERMISSION_MODE. */
@@ -48,9 +51,12 @@ export class AppConfig {
     const model = await AppConfig.store.get('model', AppConfig.MODEL) as string
     const profile = await AppConfig.store.get('profile', AppConfig.PROFILE_SDK) as string
     const permission = await AppConfig.store.get('permission_mode', AppConfig.PERMISSION_WORKSPACE) as string
+    const accent = await AppConfig.store.get('accent', 'blue') as string
     AppConfig.model = model.length === 0 ? AppConfig.MODEL : model
     AppConfig.profile = profile === AppConfig.PROFILE_ACP ? AppConfig.PROFILE_ACP : AppConfig.PROFILE_SDK
     AppConfig.permissionMode = AppConfig.normalizePermissionMode(permission)
+    AppConfig.accentId = themeIdOf(accentOf(accent))
+    AppStorage.setOrCreate(ACCENT_KEY, accentOf(AppConfig.accentId))
     AppConfig.apiKey = saved.length > 0 ? saved : AppConfig.readBundledKey(context)
   }
 
@@ -97,6 +103,24 @@ export class AppConfig {
     } catch (error) {
       // Staging is best-effort; boot falls back to the same value from prefs.
     }
+  }
+
+  /**
+   * Persist the accent and publish it to every bound view.
+   *
+   * AppStorage is the transport, not the store: the id is what survives a
+   * restart, the colour is what the views bind to. Setting both in one call
+   * keeps a switch instant while leaving the persisted value authoritative on
+   * the next launch.
+   */
+  static async saveAccent(context: common.UIAbilityContext, id: string): Promise<void> {
+    AppConfig.accentId = themeIdOf(accentOf(id))
+    AppStorage.setOrCreate(ACCENT_KEY, accentOf(AppConfig.accentId))
+    if (AppConfig.store === null) {
+      AppConfig.store = await preferences.getPreferences(context, AppConfig.STORE)
+    }
+    await AppConfig.store.put('accent', AppConfig.accentId)
+    await AppConfig.store.flush()
   }
 
   /** Both profile and approval tier are read by bootstrap at boot, not live. */

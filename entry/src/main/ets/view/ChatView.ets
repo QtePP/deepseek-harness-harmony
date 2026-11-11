@@ -9,6 +9,7 @@ import { isWriteTool } from '../model/Rollback'
 import { TodoItem, completedCount, todoSummary } from '../model/TodoModel'
 import { goalSettled, goalStatusLabel } from '../model/GoalModel'
 import { hasSecret, maskSecrets, secretCount } from '../common/SecretMask'
+import { matchWorkspaceFiles } from '../common/WorkspaceFiles'
 import { MdText, copyTextToClipboard } from './Markdown'
 
 /** One text or code segment produced by the minimal Markdown splitter. */
@@ -298,6 +299,31 @@ export function segmentsOf(text: string): Segment[] {
   return out
 }
 
+/**
+ * Composer slash commands.
+ *
+ * dsh-go maps `/` to the engine's `commands/execute`; ACP has no such method,
+ * so this palette only carries actions the shell can already perform. Naming
+ * the engine commands it cannot run would produce a menu of dead entries —
+ * the same reason the goal bar is read-only.
+ */
+interface SlashCommand {
+  name: string
+  hint: string
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  { name: '新会话', hint: '开一段新对话' },
+  { name: '模型', hint: '切换模型与推理强度' },
+  { name: '停止', hint: '取消当前回合' },
+  { name: '清空排队', hint: '丢弃排队中的消息' },
+  { name: '文件', hint: '浏览工作区文件' },
+  { name: '会话', hint: '切换历史会话' },
+  { name: '设置', hint: '打开设置' },
+  { name: '待办', hint: '展开或收起待办清单' },
+  { name: '导出对话', hint: '把当前会话写成 Markdown 存进工作区' }
+]
+
 /** A resolved artifact surfaced in the dock below the transcript. */
 export interface ArtifactItem {
   path: string
@@ -338,6 +364,9 @@ function isWebExt(path: string): boolean {
  */
 @Component
 export struct ArtifactDock {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @Prop items: ArtifactItem[] = []
   @State expandedPath: string = ''
   /** Whole-dock collapse; the default is the compressed header-only strip. */
@@ -464,7 +493,7 @@ export struct ArtifactDock {
       Row({ space: 6 }) {
         Text(isWebExt(item.path) ? '◍' : '▤')
           .fontSize(11)
-          .fontColor(item.exists ? $r('app.color.brand') : $r('app.color.text_tertiary'))
+          .fontColor(item.exists ? this.accent : $r('app.color.text_tertiary'))
         Text(item.name)
           .fontSize(11)
           .maxLines(1)
@@ -485,7 +514,7 @@ export struct ArtifactDock {
       $r('app.color.surface_muted') : $r('app.color.surface'))
     .borderRadius(10)
     .borderWidth(1)
-    .borderColor(this.expandedPath === item.path ? $r('app.color.brand') : $r('app.color.divider'))
+    .borderColor(this.expandedPath === item.path ? this.accent : $r('app.color.divider'))
     .onClick(() => this.toggle(item))
   }
 
@@ -515,12 +544,12 @@ export struct ArtifactDock {
           if (this.current() !== null) {
             Text('刷新')
               .fontSize(11)
-              .fontColor($r('app.color.brand'))
+              .fontColor(this.accent)
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
               .onClick(() => this.refresh())
             Text('全屏')
               .fontSize(11)
-              .fontColor($r('app.color.brand'))
+              .fontColor(this.accent)
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
               .onClick(() => {
                 const item = this.current()
@@ -853,6 +882,9 @@ struct TraceEntryRow {
 
 @Component
 export struct MessageItem {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @ObjectLink message: ChatMessage
   /** True only while this message is the live turn the runtime is working on. */
   @Prop @Watch('onRunningChanged') running: boolean = false
@@ -931,7 +963,7 @@ export struct MessageItem {
    */
   private boltTint(): ResourceColor {
     if (this.boltPhase === 0) {
-      return $r('app.color.brand')
+      return this.accent
     }
     if (this.boltPhase === 1) {
       return '#7C8CF8'
@@ -1024,7 +1056,7 @@ export struct MessageItem {
             .fontColor($r('app.color.text_secondary'))
           Text('全屏')
             .fontSize(11)
-            .fontColor($r('app.color.brand'))
+            .fontColor(this.accent)
             .padding({ left: 8, right: 8, top: 4, bottom: 4 })
             .backgroundColor($r('app.color.surface_muted'))
             .borderRadius(8)
@@ -1097,7 +1129,7 @@ export struct MessageItem {
       return '#C0392B'
     }
     return this.message.toolStatus === 'in_progress' ?
-      $r('app.color.brand') : $r('app.color.text_tertiary')
+      this.accent : $r('app.color.text_tertiary')
   }
 
   /** Deepening blue ramp for consecutive tool calls (a thought run restarts it); clamps at the deepest shade. */
@@ -1923,7 +1955,7 @@ export struct MessageItem {
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .constraintSize({ maxWidth: 180 })
-                .fontColor($r('app.color.brand'))
+                .fontColor(this.accent)
                 .padding({ left: 8, right: 8, top: 4, bottom: 4 })
                 .backgroundColor($r('app.color.surface_muted'))
                 .borderRadius(8)
@@ -1954,6 +1986,9 @@ export struct MessageItem {
 /** Conversation pane: transcript plus composer. */
 @Component
 export struct ChatView {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @Link @Watch('onCountChange') messages: ChatMessage[]
   @Prop @Watch('onRunningChange') running: boolean = false
   /** Dock contents, recomputed when the transcript settles (not per frame). */
@@ -1986,6 +2021,9 @@ export struct ChatView {
   @Prop goalStatus: string = ''
   /** Collapsed by default: the bar names the current step, the list is one tap away. */
   @State todoExpanded: boolean = false
+  /** `@` picker memo: the index is rebuilt by the shell at most every few seconds. */
+  private fileCacheKey: string = ''
+  private fileCache: string[] = []
   /** Phones have no rail: show a top-bar entry that opens the sessions sheet. */
   showSessionsEntry: boolean = false
   onSend: (text: string, attachPaths: string[]) => void = () => {}
@@ -2006,6 +2044,12 @@ export struct ChatView {
   onSendNow: () => void = () => {}
   /** Re-answer a question in a fresh conversation. */
   onRegenerate: (messageId: string) => void = () => {}
+  /** Drop every queued turn (the `/清空排队` command). */
+  onClearQueue: () => void = () => {}
+  /** Workspace file index for the `@` picker; the shell owns the filesystem. */
+  onSearchFiles: (query: string) => string[] = () => []
+  /** Write the conversation to the workspace (the shell owns the files). */
+  onExport: () => void = () => {}
   /**
    * Send is allowed whenever there is something to send. A live turn no longer
    * blocks the composer: the tap queues the message and the shell sends it the
@@ -2281,6 +2325,164 @@ export struct ChatView {
     }
   }
 
+  /** Text after the leading `/`, or '' when the draft is not a command. */
+  private slashQuery(): string {
+    const text = this.draft
+    if (text.length === 0 || text.charAt(0) !== '/') {
+      return ''
+    }
+    if (text.indexOf('\n') >= 0 || text.indexOf(' ') >= 0) {
+      return ''
+    }
+    return text.substring(1)
+  }
+
+  private slashMatches(): SlashCommand[] {
+    const query = this.slashQuery()
+    const out: SlashCommand[] = []
+    for (const command of SLASH_COMMANDS) {
+      if (query.length === 0 || command.name.indexOf(query) >= 0) {
+        out.push(command)
+      }
+    }
+    return out
+  }
+
+  /** Run one palette entry. The draft is consumed either way. */
+  private runSlash(name: string): void {
+    this.draft = ''
+    if (name === '新会话') {
+      this.onNewSession()
+    } else if (name === '模型') {
+      this.onPickModel()
+    } else if (name === '停止') {
+      this.onStop()
+    } else if (name === '清空排队') {
+      this.onClearQueue()
+    } else if (name === '文件') {
+      this.onOpenFiles()
+    } else if (name === '会话') {
+      this.onOpenSessions()
+    } else if (name === '设置') {
+      this.onOpenSettings()
+    } else if (name === '待办') {
+      this.todoExpanded = !this.todoExpanded
+    } else if (name === '导出对话') {
+      this.onExport()
+    }
+  }
+
+  /** The token being typed after the last `@`, or null when no `@` is open. */
+  private atToken(): string | null {
+    const text = this.draft
+    const at = text.lastIndexOf('@')
+    if (at < 0) {
+      return null
+    }
+    const tail = text.substring(at + 1)
+    if (tail.indexOf('\n') >= 0 || tail.indexOf(' ') >= 0) {
+      return null
+    }
+    return tail
+  }
+
+  private fileMatches(): string[] {
+    const token = this.atToken()
+    if (token === null) {
+      return []
+    }
+    if (this.fileCacheKey !== token) {
+      this.fileCacheKey = token
+      this.fileCache = matchWorkspaceFiles(this.onSearchFiles(token), token, 8)
+    }
+    return this.fileCache
+  }
+
+  /** Replace the `@token` under the cursor with the chosen relative path. */
+  private insertFileRef(path: string): void {
+    const text = this.draft
+    const at = text.lastIndexOf('@')
+    const head = at >= 0 ? text.substring(0, at) : text
+    this.draft = `${head}@${path} `
+    this.fileCacheKey = ''
+  }
+
+  /**
+   * The `/` palette.
+   *
+   * It only appears while the draft is a single command-shaped token, so
+   * typing prose that happens to contain a slash never pops a menu over the
+   * conversation.
+   */
+  @Builder
+  slashPalette() {
+    if (this.slashQuery().length > 0 || this.draft === '/') {
+      Column({ space: 2 }) {
+        ForEach(this.slashMatches(), (command: SlashCommand) => {
+          Row({ space: 10 }) {
+            Text(`/${command.name}`)
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+              .width(96)
+            Text(command.hint)
+              .fontSize(11)
+              .fontColor($r('app.color.text_tertiary'))
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .width('100%')
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .borderRadius(8)
+          .onClick(() => this.runSlash(command.name))
+        }, (command: SlashCommand) => command.name)
+      }
+      .width('100%')
+      .padding(4)
+      .backgroundColor($r('app.color.surface'))
+      .borderRadius(12)
+      .shadow({ radius: 16, color: 'rgba(0,0,0,0.06)', offsetY: 4 })
+    }
+  }
+
+  /**
+   * The `@` file picker.
+   *
+   * Paths are inserted relative to the project workspace, which is the cwd the
+   * runtime sees — an absolute sandbox path would be correct but unreadable in
+   * the transcript and in the model's own reference.
+   */
+  @Builder
+  filePicker() {
+    if (this.fileMatches().length > 0) {
+      Column({ space: 2 }) {
+        ForEach(this.fileMatches(), (path: string) => {
+          Row({ space: 8 }) {
+            SymbolGlyph($r('sys.symbol.doc_text'))
+              .fontSize(12)
+              .fontColor([$r('app.color.text_tertiary')])
+            Text(path)
+              .fontSize(12)
+              .fontColor($r('app.color.text_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          }
+          .width('100%')
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .borderRadius(8)
+          .onClick(() => this.insertFileRef(path))
+        }, (path: string) => path)
+      }
+      .width('100%')
+      .padding(4)
+      .backgroundColor($r('app.color.surface'))
+      .borderRadius(12)
+      .shadow({ radius: 16, color: 'rgba(0,0,0,0.06)', offsetY: 4 })
+    }
+  }
+
   /**
    * The objective bar, above the plan bar.
    *
@@ -2303,7 +2505,7 @@ export struct ChatView {
         Text(goalStatusLabel(this.goalStatus))
           .fontSize(10)
           .fontColor(goalSettled(this.goalStatus) ?
-            $r('app.color.text_tertiary') : $r('app.color.brand'))
+            $r('app.color.text_tertiary') : this.accent)
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius(6)
@@ -2489,7 +2691,7 @@ export struct ChatView {
           .width(20)
           .height(20)
           .color(this.contextPercent() >= 90 ? $r('app.color.status_danger')
-            : (this.contextPercent() >= 70 ? '#E08A3C' : $r('app.color.brand')))
+            : (this.contextPercent() >= 70 ? '#E08A3C' : this.accent))
           .backgroundColor($r('app.color.surface_muted'))
           .style({ strokeWidth: 3 })
       }
@@ -2509,7 +2711,7 @@ export struct ChatView {
     if (status === 'completed') {
       return $r('app.color.status_success')
     }
-    return status === 'in_progress' ? $r('app.color.brand') : $r('app.color.text_tertiary')
+    return status === 'in_progress' ? this.accent : $r('app.color.text_tertiary')
   }
 
   /**
@@ -2537,7 +2739,7 @@ export struct ChatView {
             // affects, instead of being folded into the stop button.
             Text('立即发送')
               .fontSize(11)
-              .fontColor($r('app.color.brand'))
+              .fontColor(this.accent)
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
               .borderRadius(8)
               .backgroundColor($r('app.color.surface_muted'))
@@ -2769,6 +2971,10 @@ export struct ChatView {
 
         this.queueStrip()
 
+        this.slashPalette()
+
+        this.filePicker()
+
         if (this.attachPaths.length > 0) {
           Column({ space: 8 }) {
             Row({ space: 8 }) {
@@ -2852,7 +3058,7 @@ export struct ChatView {
                   Image($r('app.media.icon_model'))
                     .width(16)
                     .height(16)
-                    .fillColor(this.modelPressed ? $r('app.color.brand') : $r('app.color.text_secondary'))
+                    .fillColor(this.modelPressed ? this.accent : $r('app.color.text_secondary'))
                 }
                 .width(28)
                 .height(28)
@@ -2911,7 +3117,7 @@ export struct ChatView {
             // refuses a second prompt on a running session). The label says so
             // before the tap instead of after it.
             .backgroundColor(this.canSend() ?
-              $r('app.color.brand') : $r('app.color.surface_muted'))
+              this.accent : $r('app.color.surface_muted'))
             .fontColor(this.canSend() ?
               Color.White : $r('app.color.text_tertiary'))
             .scale({

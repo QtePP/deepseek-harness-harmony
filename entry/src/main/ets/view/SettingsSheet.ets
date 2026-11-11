@@ -1,19 +1,25 @@
 import { PluginRow } from '../model/PluginCatalog'
 import { AppConfig } from '../common/AppConfig'
+import { THEMES, ThemeOption } from '../common/Theme'
 
 /** Settings sheet: credentials, model route, capability toggles, diagnostics. */
 @Component
 export struct SettingsSheet {
+  /** Accent bound to AppStorage; every theme switch repaints without a restart. */
+  @StorageLink('accent') accent: string = '#4D6BFE'
+
   @State apiKey: string = ''
   @State model: string = ''
   @State profile: string = 'sdk'
   @State permissionMode: string = 'workspace-write'
+  @State accentId: string = 'blue'
   @State showDiagnostics: boolean = false
   @State showLocked: boolean = false
   @Prop initialKey: string = ''
   @Prop initialModel: string = ''
   @Prop initialProfile: string = 'sdk'
   @Prop initialPermission: string = 'workspace-write'
+  @Prop initialAccent: string = 'blue'
   @Prop diagnostics: string = ''
   @Prop pluginRows: PluginRow[] = []
   onSave: (key: string, model: string) => void = () => {}
@@ -21,12 +27,15 @@ export struct SettingsSheet {
   onRefreshDiagnostics: () => void = () => {}
   onResetPayload: () => void = () => {}
   onTogglePlugin: (id: string, enabled: boolean) => void = () => {}
+  /** Accent id; the shell persists it and republishes the colour. */
+  onAccentChange: (id: string) => void = () => {}
 
   aboutToAppear(): void {
     this.apiKey = this.initialKey
     this.model = this.initialModel
     this.profile = this.initialProfile === 'acp' ? 'acp' : 'sdk'
     this.permissionMode = AppConfig.normalizePermissionMode(this.initialPermission)
+    this.accentId = this.initialAccent
   }
 
   private permissionHint(mode: string): string {
@@ -93,13 +102,44 @@ export struct SettingsSheet {
         .alignItems(HorizontalAlign.Start)
         .width('100%')
 
+        Column({ space: 8 }) {
+          Text('主题色').fontSize(12).fontColor($r('app.color.text_secondary'))
+          Row({ space: 10 }) {
+            ForEach(THEMES, (theme: ThemeOption) => {
+              Stack() {
+                Circle({ width: 28, height: 28 })
+                  .fill(theme.value)
+                if (theme.id === this.accentId) {
+                  Circle({ width: 34, height: 34 })
+                    .fill(Color.Transparent)
+                    .stroke(theme.value)
+                    .strokeWidth(2)
+                }
+              }
+              .width(36)
+              .height(36)
+              .accessibilityText(`主题色：${theme.label}`)
+              .onClick(() => {
+                this.accentId = theme.id
+                this.onAccentChange(theme.id)
+              })
+            }, (theme: ThemeOption) => theme.id)
+          }
+          .width('100%')
+          Text('只改强调色：按钮、链接、选中行与上下文环；背景与气泡保持中性色。')
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+
         Column({ space: 6 }) {
           Text('对话协议（实验）').fontSize(12).fontColor($r('app.color.text_secondary'))
           Row({ space: 8 }) {
             Button('SDK（默认）')
               .layoutWeight(1)
               .fontSize(13)
-              .backgroundColor(this.profile === 'sdk' ? $r('app.color.brand') : $r('app.color.surface_muted'))
+              .backgroundColor(this.profile === 'sdk' ? this.accent : $r('app.color.surface_muted'))
               .fontColor(this.profile === 'sdk' ? Color.White : $r('app.color.text_primary'))
               .onClick(() => {
                 this.profile = 'sdk'
@@ -108,7 +148,7 @@ export struct SettingsSheet {
             Button('ACP（流式/审批/取消）')
               .layoutWeight(1)
               .fontSize(13)
-              .backgroundColor(this.profile === 'acp' ? $r('app.color.brand') : $r('app.color.surface_muted'))
+              .backgroundColor(this.profile === 'acp' ? this.accent : $r('app.color.surface_muted'))
               .fontColor(this.profile === 'acp' ? Color.White : $r('app.color.text_primary'))
               .onClick(() => {
                 this.profile = 'acp'
@@ -124,7 +164,7 @@ export struct SettingsSheet {
               .layoutWeight(1)
               .fontSize(13)
               .backgroundColor(this.permissionMode === AppConfig.PERMISSION_READONLY ?
-                $r('app.color.brand') : $r('app.color.surface_muted'))
+                this.accent : $r('app.color.surface_muted'))
               .fontColor(this.permissionMode === AppConfig.PERMISSION_READONLY ?
                 Color.White : $r('app.color.text_primary'))
               .onClick(() => {
@@ -135,7 +175,7 @@ export struct SettingsSheet {
               .layoutWeight(1)
               .fontSize(13)
               .backgroundColor(this.permissionMode === AppConfig.PERMISSION_WORKSPACE ?
-                $r('app.color.brand') : $r('app.color.surface_muted'))
+                this.accent : $r('app.color.surface_muted'))
               .fontColor(this.permissionMode === AppConfig.PERMISSION_WORKSPACE ?
                 Color.White : $r('app.color.text_primary'))
               .onClick(() => {
@@ -146,7 +186,7 @@ export struct SettingsSheet {
               .layoutWeight(1)
               .fontSize(13)
               .backgroundColor(this.permissionMode === AppConfig.PERMISSION_DANGER ?
-                $r('app.color.brand') : $r('app.color.surface_muted'))
+                this.accent : $r('app.color.surface_muted'))
               .fontColor(this.permissionMode === AppConfig.PERMISSION_DANGER ?
                 Color.White : $r('app.color.text_primary'))
               .onClick(() => {
@@ -224,7 +264,7 @@ export struct SettingsSheet {
               .layoutWeight(1)
 
               Toggle({ type: ToggleType.Switch, isOn: row.enabled })
-                .selectedColor($r('app.color.brand'))
+                .selectedColor(this.accent)
                 .onChange((isOn: boolean) => {
                   this.onTogglePlugin(row.id, isOn)
                 })
@@ -239,7 +279,7 @@ export struct SettingsSheet {
               .layoutWeight(1)
             Text(this.showLocked ? '收起' : '展开')
               .fontSize(12)
-              .fontColor($r('app.color.brand'))
+              .fontColor(this.accent)
           }
           .width('100%')
           .padding({ top: 4 })

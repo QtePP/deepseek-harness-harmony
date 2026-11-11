@@ -185,8 +185,14 @@ ACP 实测契约（勿凭直觉改）：
   只遮挡渲染（前 8 位 + 可展开），存储/复制/重发保真；⑩**系统通知**——后台时一轮完成/出错/
   待审批发本地通知（`common/Notify.ets`，前台不发、首次用才要授权）；⑪**图片存相册**——
   全屏查看器用 `SaveButton` 安全组件换临时媒体写权限再 `createAsset`，不申请受限权限
-  （`common/Gallery.ets`）。
-  本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 35 文件 + LocalUnit 构建通过）。
+  （`common/Gallery.ets`）；⑫**斜杠命令面板**——`/` 只映射本地动作（8 条），引擎命令 ACP 无通道
+  故不列（含 `导出对话`：`model/Export.ets` 把转录写成 Markdown 存进 `workspace/exports/`，
+  因为 ACP 没有 `session/export`）；⑬**`@` 文件引用**——`common/WorkspaceFiles.ets` 索引工作区（深度 3 / 300 条 / 跳过
+  node_modules 等），4s TTL，插入相对路径；⑭**六套主题色**——`common/Theme.ets` +
+  `AppStorage['accent']`，9 个组件 `@StorageLink('accent')` 绑定，只换强调色、背景保持中性。
+  **语音输入暂不可做**：本机 DevEco SDK（API 26）不含 HMS `@kit.CoreSpeechKit`
+  （`ets/kits` 与 `api/@hms.ai.speechRecognizer.d.ts` 均不存在），要做得先引入 HMS Core SDK。
+  本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 38 文件 + LocalUnit 构建通过）。
 - **in-process PTC 运行时已交付并真机闭环（2026-10-27，P1①）**：
   `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
   `dsh-bundle-ohos` patch 禁 stock `ptc-runtime`；`tools` 行现为 `mode: native`
