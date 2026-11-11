@@ -327,6 +327,7 @@ ACP 实测契约（勿凭直觉改）：
 | `docs/BUILD.md` | 构建、签名、装机、排障（含受限环境坑） |
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
 | `docs/PLUGIN-MIGRATION.md` | 客户端插件迁移分级（P0/P1/P2/不迁） |
+| `docs/PERSONAL-AGENT.md` | 个人 Agent 与卡片演进方案（Agent Pack / CardSpec / 与 Muse 对比）。**§3–§6 的「垂域卡片做进外壳」方向已停**，文首有 2026-11-12 勘误；保留的是可复用的分析（Muse 对比、度量指标、风险表） |
 | 垂域仓（不在本仓） | <https://github.com/QtePP/Harmony-harness-game>（私有）。游戏的三层——裁判引擎 `@ohos/dsh-sanguo`、棋盘 `SanguoBoard*`、五个 agent pack——都在那边。**本仓不引用它们**：外壳只提供会话/文件/审批/设置，不认识任何垂域概念 |
 | `.workbuddy-ai/memory/` | 本地会话记忆（gitignored，不提交） |
 
