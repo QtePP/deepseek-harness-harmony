@@ -29,6 +29,8 @@ export struct SettingsSheet {
   onTogglePlugin: (id: string, enabled: boolean) => void = () => {}
   /** Accent id; the shell persists it and republishes the colour. */
   onAccentChange: (id: string) => void = () => {}
+  /** Ask the system for the notification switch (background turn results). */
+  onEnableNotifications: () => void = () => {}
 
   aboutToAppear(): void {
     this.apiKey = this.initialKey
@@ -98,6 +100,30 @@ export struct SettingsSheet {
             .onChange((value: string) => {
               this.model = value
             })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+
+        Column({ space: 8 }) {
+          Row({ space: 10 }) {
+            Column({ space: 2 }) {
+              Text('后台通知').fontSize(14).fontColor($r('app.color.text_primary'))
+              Text('切到后台后，一轮完成 / 出错 / 等待审批时提醒')
+                .fontSize(11)
+                .fontColor($r('app.color.text_tertiary'))
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+
+            Button('开启')
+              .fontSize(12)
+              .height(32)
+              .backgroundColor($r('app.color.surface_muted'))
+              .fontColor($r('app.color.text_primary'))
+              .onClick(() => this.onEnableNotifications())
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
         }
         .alignItems(HorizontalAlign.Start)
         .width('100%')
@@ -210,6 +236,10 @@ export struct SettingsSheet {
         Row({ space: 10 }) {
           Button('保存')
             .layoutWeight(1)
+            // Follows the accent like every other primary action; the default
+            // system blue was the one control that ignored the theme.
+            .backgroundColor(this.accent)
+            .fontColor(Color.White)
             .onClick(() => this.onSave(this.apiKey, this.model))
           Button('诊断')
             .layoutWeight(1)

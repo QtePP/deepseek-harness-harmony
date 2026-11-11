@@ -49,6 +49,19 @@
 
 ### 修复
 
+- **手机端 `/` 命令与 `@` 引用点了没反应**（真机发现）：`Index` 里宽屏与手机各有一处
+  `ChatView` 调用，新增回调只接到了宽屏那处，手机端 `onClearQueue` / `onExport` /
+  `onSearchFiles` 全部回落到组件的 no-op 默认值。两处已补齐，并在代码里写明「两个调用点必须同步」。
+- **`@` 选择器永远不出现**（真机发现）：缓存键初值 `''` 与「刚输入 `@`」的空查询 `''` 相等，
+  第一次查询被判成缓存命中，列表一直是空的。改为独立的有效性标记。
+- **重新回答丢标题、并多出一条「服务端上下文不可用」**（真机发现）：发送时
+  `messages.length === 0` 会无条件重命名会话，把「· 重答」覆盖掉；ACP 下又对临时本地 id 做
+  `session/resume`，失败后追加系统提示。改为只在会话还没有名字时自动命名，ACP 下先
+  `session/new` 再保存本地副本。
+- **通知授权在后台必然失败**（真机发现）：`requestEnableNotification` 只能在应用可见时弹框。
+  改为后台只记「待请求」，回到前台再请求；设置页新增「后台通知 › 开启」，失败时 toast 出原因
+  并提示去系统设置打开。
+- **设置页「保存」按钮不跟主题色**：默认系统蓝是唯一忽略强调色的控件，改为 accent。
 - **Flash 模型每一轮都发送失败**：上游 catalog 给 `deepseek-flash` 标了
   `toolUpdate: "addition-only"`，该路由会把全部工具标成 `deferLoading: true`，
   API 直接拒绝（`at least one tool must have defer_loading=false`）。

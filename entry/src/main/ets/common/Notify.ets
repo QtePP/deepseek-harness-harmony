@@ -23,6 +23,15 @@ const NOTIFY_ID = 4517
 export class Notify {
   private static context: common.UIAbilityContext | null = null
   private static asked: boolean = false
+  /**
+   * The user backgrounded the app with work in flight, but notifications are
+   * still off. The authorization dialog can only be shown while the app is in
+   * the foreground, so the request is deferred to the next foreground instead
+   * of failing silently in the background.
+   */
+  private static pendingRequest: boolean = false
+  /** Automatic requests are capped; the Settings button is the explicit path. */
+  private static attempts: number = 0
   /** Kept by EntryAbility; a static field rather than AppStorage so the
    *  ability (which is not a UI component) can write it without importing
    *  the UI framework's storage. */
@@ -35,6 +44,45 @@ export class Notify {
   /** EntryAbility keeps this current; an unknown state counts as foreground. */
   static setForeground(value: boolean): void {
     Notify.fg = value
+    if (value && Notify.pendingRequest) {
+      void Notify.requestPermissionQuietly()
+    }
+  }
+
+  /**
+   * Ask for the notification switch. Returns a short status for the caller's
+   * toast, because on some devices the switch is administratively off and the
+   * API fails without ever showing a dialog — the user needs to hear that
+   * instead of wondering why nothing happens.
+   */
+  static async requestPermission(): Promise<string> {
+    const context = Notify.context
+    if (context === null) {
+      return '应用尚未就绪'
+    }
+    try {
+      const enabled = await notificationManager.isNotificationEnabled()
+      if (enabled) {
+        return '通知已开启'
+      }
+      await notificationManager.requestEnableNotification(context)
+      Notify.pendingRequest = false
+      return '已请求通知权限'
+    } catch (error) {
+      const failure = error as BusinessError
+      return `通知未开启：${failure.message}（可在系统设置 › 通知 › TA Harness 中打开）`
+    }
+  }
+
+  /** Automatic path: ask at most twice, then stop nagging. */
+  private static async requestPermissionQuietly(): Promise<void> {
+    if (Notify.asked || Notify.attempts >= 2) {
+      return
+    }
+    Notify.asked = true
+    Notify.attempts++
+    await Notify.requestPermission()
+    Notify.asked = false
   }
 
   private static foreground(): boolean {
@@ -73,11 +121,10 @@ export class Notify {
     try {
       const enabled = await notificationManager.isNotificationEnabled()
       if (!enabled) {
-        if (Notify.asked) {
-          return
-        }
-        Notify.asked = true
-        await notificationManager.requestEnableNotification(context)
+        // Backgrounded: the dialog cannot be shown here, so remember that the
+        // user needs to be asked and drop this notification.
+        Notify.pendingRequest = true
+        return
       }
       const request: notificationManager.NotificationRequest = {
         id: NOTIFY_ID,

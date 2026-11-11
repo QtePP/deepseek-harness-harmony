@@ -641,8 +641,17 @@ struct Index {
     }
     await this.persist()
     const kept = this.messages.slice(0, userIndex)
-    const freshId = newSessionId()
     const freshTitle = `${this.title.length > 0 ? this.title : '会话'} · 重答`
+    // ACP: mint the server session before saving the local copy, so the id in
+    // the index is one the runtime already owns. Resuming a made-up id would
+    // fail and leave a "服务端上下文不可用" note in a brand-new conversation.
+    let freshId = newSessionId()
+    if (this.host.isAcp() && this.phase === BootPhase.READY) {
+      const created = await this.createAcpSession()
+      if (created.length > 0) {
+        freshId = created
+      }
+    }
     await this.store.save(freshId, this.currentProjectId, freshTitle, kept)
     this.currentId = freshId
     this.title = freshTitle
@@ -984,7 +993,10 @@ struct Index {
     if (text.length === 0) {
       return
     }
-    if (this.messages.length === 0) {
+    // Auto-name only a conversation that has no name yet: a fork or a
+    // regenerate sets its own title before sending, and overwriting it here
+    // made both flows look like an untitled new chat.
+    if (this.messages.length === 0 && (this.title.length === 0 || this.title === '新会话')) {
       this.title = titleOf(text)
     }
     this.append(new ChatMessage(newSessionId(), Role.USER, text, ''))
@@ -1103,7 +1115,7 @@ struct Index {
     if (blocks.length === 0) {
       return
     }
-    if (this.messages.length === 0) {
+    if (this.messages.length === 0 && (this.title.length === 0 || this.title === '新会话')) {
       this.title = titleOf(text.length > 0 ? text : '图片请求')
     }
     // The label is derived from the image count at render time; storing a
@@ -1691,6 +1703,12 @@ struct Index {
   }
 
   /** Profile and approval tier are boot-time env; persisted for next launch. */
+  /** Ask the system for the notification switch and say what happened. */
+  private async enableNotifications(): Promise<void> {
+    const message = await Notify.requestPermission()
+    this.getUIContext().getPromptAction().showToast({ message: message, duration: 3000 })
+  }
+
   /** Accent switches are live: persist the id, republish the colour. */
   private async saveAccentChoice(id: string): Promise<void> {
     if (this.context === null) {
@@ -2175,6 +2193,9 @@ struct Index {
       onAccentChange: (id: string) => {
         void this.saveAccentChoice(id)
       },
+      onEnableNotifications: () => {
+        void this.enableNotifications()
+      },
       onRefreshDiagnostics: () => this.refreshDiagnostics(),
       onResetPayload: () => {
         this.diagnostics = '已标记重建；请彻底退出并重新打开应用。'
@@ -2421,6 +2442,17 @@ struct Index {
                 onStop: () => this.stopAcp(),
                 onDequeue: (index: number) => this.dequeueAt(index),
                 onSendNow: () => this.sendQueuedNow(),
+                // Both ChatView call sites (wide and phone) must carry the same
+                // callbacks: a missing one silently falls back to the component's
+                // no-op default, which is how `/导出对话` and the `@` picker were
+                // dead on phones while working on tablets.
+                onClearQueue: () => {
+                  this.queued = []
+                },
+                onExport: () => {
+                  void this.exportConversation()
+                },
+                onSearchFiles: (query: string) => this.searchWorkspaceFiles(query),
                 onRegenerate: (messageId: string) => {
                   void this.regenerate(messageId)
                 },

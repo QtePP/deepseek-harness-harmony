@@ -193,6 +193,15 @@ ACP 实测契约（勿凭直觉改）：
   **语音输入暂不可做**：本机 DevEco SDK（API 26）不含 HMS `@kit.CoreSpeechKit`
   （`ets/kits` 与 `api/@hms.ai.speechRecognizer.d.ts` 均不存在），要做得先引入 HMS Core SDK。
   本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 38 文件 + LocalUnit 构建通过）。
+  **真机验收（2026-11-12，手机，ACP profile，`scripts/deploy.sh` 调试签名）**：冷启与安装正常；
+  通过的有——`/` 命令面板（9 条）、`@` 文件选择与插入（相对路径）、`/导出对话`（真实写出
+  `workspace/exports/<标题>-<时间>.md`，模型随后能读到）、待办条（3/3 全绿）、目标条
+  （进行中 → 已完成）、完成摘要（`已完成 · N 步 · 2.6s`）、上下文小环、凭据遮挡
+  （`sk-abcde…` + 「已隐藏 1 处凭据」）、排队（跑动中入队、settle 后自动发出，模型确认收到）、
+  主题切换（琥珀，重启后保持）、重新回答（新会话「· 重答」）、长按菜单五项。
+  **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
+  也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
+  `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。
 - **in-process PTC 运行时已交付并真机闭环（2026-10-27，P1①）**：
   `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
   `dsh-bundle-ohos` patch 禁 stock `ptc-runtime`；`tools` 行现为 `mode: native`

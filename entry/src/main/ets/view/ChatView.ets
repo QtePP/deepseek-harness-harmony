@@ -2021,9 +2021,14 @@ export struct ChatView {
   @Prop goalStatus: string = ''
   /** Collapsed by default: the bar names the current step, the list is one tap away. */
   @State todoExpanded: boolean = false
-  /** `@` picker memo: the index is rebuilt by the shell at most every few seconds. */
+  /**
+   * `@` picker memo. The validity flag is separate from the key on purpose:
+   * an empty query (draft is just `@`) is a real query, so keying on the token
+   * alone would treat "" == "" as a cache hit and never ask for files.
+   */
   private fileCacheKey: string = ''
   private fileCache: string[] = []
+  private fileCacheValid: boolean = false
   /** Phones have no rail: show a top-bar entry that opens the sessions sheet. */
   showSessionsEntry: boolean = false
   onSend: (text: string, attachPaths: string[]) => void = () => {}
@@ -2391,9 +2396,10 @@ export struct ChatView {
     if (token === null) {
       return []
     }
-    if (this.fileCacheKey !== token) {
+    if (!this.fileCacheValid || this.fileCacheKey !== token) {
       this.fileCacheKey = token
       this.fileCache = matchWorkspaceFiles(this.onSearchFiles(token), token, 8)
+      this.fileCacheValid = true
     }
     return this.fileCache
   }
@@ -2404,7 +2410,7 @@ export struct ChatView {
     const at = text.lastIndexOf('@')
     const head = at >= 0 ? text.substring(0, at) : text
     this.draft = `${head}@${path} `
-    this.fileCacheKey = ''
+    this.fileCacheValid = false
   }
 
   /**
