@@ -1703,6 +1703,18 @@ struct Index {
   }
 
   /** Profile and approval tier are boot-time env; persisted for next launch. */
+  /** Persist the appearance; the switch itself happens at the next launch. */
+  private async saveAppearanceChoice(mode: string): Promise<void> {
+    if (this.context === null) {
+      return
+    }
+    await AppConfig.saveAppearance(this.context, mode)
+    this.getUIContext().getPromptAction().showToast({
+      message: '外观已保存，重启应用后生效',
+      duration: 2600
+    })
+  }
+
   /** Ask the system for the notification switch and say what happened. */
   private async enableNotifications(): Promise<void> {
     const message = await Notify.requestPermission()
@@ -2182,6 +2194,7 @@ struct Index {
       initialProfile: AppConfig.profile,
       initialPermission: AppConfig.permissionMode,
       initialAccent: AppConfig.accentId,
+      initialAppearance: AppConfig.appearance,
       diagnostics: this.diagnostics,
       pluginRows: this.pluginRows,
       onSave: (key: string, model: string) => {
@@ -2195,6 +2208,9 @@ struct Index {
       },
       onEnableNotifications: () => {
         void this.enableNotifications()
+      },
+      onAppearanceChange: (mode: string) => {
+        void this.saveAppearanceChoice(mode)
       },
       onRefreshDiagnostics: () => this.refreshDiagnostics(),
       onResetPayload: () => {

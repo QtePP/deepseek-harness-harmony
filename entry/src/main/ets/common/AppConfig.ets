@@ -1,4 +1,4 @@
-import { common } from '@kit.AbilityKit'
+import { common, ConfigurationConstant } from '@kit.AbilityKit'
 import { preferences } from '@kit.ArkData'
 import { util } from '@kit.ArkTS'
 import { BusinessError } from '@kit.BasicServicesKit'
@@ -26,6 +26,9 @@ export class AppConfig {
   static readonly PERMISSION_READONLY: string = 'read-only'
   static readonly PERMISSION_WORKSPACE: string = 'workspace-write'
   static readonly PERMISSION_DANGER: string = 'danger-full-access'
+  static readonly APPEARANCE_SYSTEM: string = 'system'
+  static readonly APPEARANCE_LIGHT: string = 'light'
+  static readonly APPEARANCE_DARK: string = 'dark'
 
   /** Named presets shipped by dsh (dsh-base cordis.patch.yml): sandbox + approval bundled. */
   static normalizePermissionMode(mode: string): string {
@@ -39,6 +42,8 @@ export class AppConfig {
   static model: string = AppConfig.MODEL
   /** Accent theme id; the colour itself lives in AppStorage for the views. */
   static accentId: string = 'blue'
+  /** 'system' | 'light' | 'dark'; applied through the application context. */
+  static appearance: string = AppConfig.APPEARANCE_SYSTEM
   /** dsh profile for the next boot; SDK stays the default, ACP is opt-in. */
   static profile: string = AppConfig.PROFILE_SDK
   /** Approval tier surfaced to bootstrap as DSH_PERMISSION_MODE. */
@@ -52,11 +57,13 @@ export class AppConfig {
     const profile = await AppConfig.store.get('profile', AppConfig.PROFILE_SDK) as string
     const permission = await AppConfig.store.get('permission_mode', AppConfig.PERMISSION_WORKSPACE) as string
     const accent = await AppConfig.store.get('accent', 'blue') as string
+    const appearance = await AppConfig.store.get('appearance', AppConfig.APPEARANCE_SYSTEM) as string
     AppConfig.model = model.length === 0 ? AppConfig.MODEL : model
     AppConfig.profile = profile === AppConfig.PROFILE_ACP ? AppConfig.PROFILE_ACP : AppConfig.PROFILE_SDK
     AppConfig.permissionMode = AppConfig.normalizePermissionMode(permission)
     AppConfig.accentId = themeIdOf(accentOf(accent))
     AppStorage.setOrCreate(ACCENT_KEY, accentOf(AppConfig.accentId))
+    AppConfig.appearance = AppConfig.normalizeAppearance(appearance)
     AppConfig.apiKey = saved.length > 0 ? saved : AppConfig.readBundledKey(context)
   }
 
@@ -103,6 +110,66 @@ export class AppConfig {
     } catch (error) {
       // Staging is best-effort; boot falls back to the same value from prefs.
     }
+  }
+
+  /**
+   * Apply the saved appearance before the page is created.
+   *
+   * `setColorMode` while a page is alive rebuilds the window and leaves the
+   * ArkUI tree blank on this device, so the switch is a boot-time decision:
+   * EntryAbility calls this in onCreate, before loadContent, using the
+   * synchronous preferences API. Changing it in Settings persists the choice
+   * and asks for a restart.
+   */
+  static applyAppearanceAtBoot(context: common.UIAbilityContext): void {
+    let mode: string = AppConfig.APPEARANCE_SYSTEM
+    try {
+      const store = preferences.getPreferencesSync(context, { name: AppConfig.STORE })
+      mode = store.getSync('appearance', AppConfig.APPEARANCE_SYSTEM) as string
+    } catch (error) {
+      // No store yet (first launch): follow the system.
+    }
+    AppConfig.appearance = AppConfig.normalizeAppearance(mode)
+    AppConfig.applyAppearance(context)
+  }
+
+  /** Unknown or legacy values fall back to following the system. */
+  static normalizeAppearance(mode: string): string {
+    if (mode === AppConfig.APPEARANCE_LIGHT || mode === AppConfig.APPEARANCE_DARK) {
+      return mode
+    }
+    return AppConfig.APPEARANCE_SYSTEM
+  }
+
+  /**
+   * Apply the appearance through the application context.
+   *
+   * The light and dark resource sets are already complete, so switching is one
+   * runtime call — no restart, and the system setting is the default rather
+   * than something the app fights.
+   */
+  static applyAppearance(context: common.UIAbilityContext): void {
+    let mode: ConfigurationConstant.ColorMode = ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET
+    if (AppConfig.appearance === AppConfig.APPEARANCE_LIGHT) {
+      mode = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT
+    } else if (AppConfig.appearance === AppConfig.APPEARANCE_DARK) {
+      mode = ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+    }
+    try {
+      context.getApplicationContext().setColorMode(mode)
+    } catch (error) {
+      // Older devices may reject the call; the system setting still applies.
+    }
+  }
+
+  /** Persist the appearance choice; it takes effect on the next launch. */
+  static async saveAppearance(context: common.UIAbilityContext, mode: string): Promise<void> {
+    AppConfig.appearance = AppConfig.normalizeAppearance(mode)
+    if (AppConfig.store === null) {
+      AppConfig.store = await preferences.getPreferences(context, AppConfig.STORE)
+    }
+    await AppConfig.store.put('appearance', AppConfig.appearance)
+    await AppConfig.store.flush()
   }
 
   /**

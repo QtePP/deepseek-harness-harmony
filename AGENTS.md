@@ -199,6 +199,9 @@ ACP 实测契约（勿凭直觉改）：
   （进行中 → 已完成）、完成摘要（`已完成 · N 步 · 2.6s`）、上下文小环、凭据遮挡
   （`sk-abcde…` + 「已隐藏 1 处凭据」）、排队（跑动中入队、settle 后自动发出，模型确认收到）、
   主题切换（琥珀，重启后保持）、重新回答（新会话「· 重答」）、长按菜单五项。
+  **外观三档（跟随系统/浅色/深色）已真机验成**：浅色与深色均重启后保持；**暗色必须在启动期应用**
+  ——运行中 `setColorMode` 会重建窗口并让 ArkUI 树变黑屏（真机实测），因此 `EntryAbility.onCreate`
+  用 `getPreferencesSync` 先读 `appearance` 再 `loadContent`，设置页只落盘 + 提示重启。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。

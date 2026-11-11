@@ -13,6 +13,7 @@ export struct SettingsSheet {
   @State profile: string = 'sdk'
   @State permissionMode: string = 'workspace-write'
   @State accentId: string = 'blue'
+  @State appearance: string = 'system'
   @State showDiagnostics: boolean = false
   @State showLocked: boolean = false
   @Prop initialKey: string = ''
@@ -20,6 +21,7 @@ export struct SettingsSheet {
   @Prop initialProfile: string = 'sdk'
   @Prop initialPermission: string = 'workspace-write'
   @Prop initialAccent: string = 'blue'
+  @Prop initialAppearance: string = 'system'
   @Prop diagnostics: string = ''
   @Prop pluginRows: PluginRow[] = []
   onSave: (key: string, model: string) => void = () => {}
@@ -31,6 +33,8 @@ export struct SettingsSheet {
   onAccentChange: (id: string) => void = () => {}
   /** Ask the system for the notification switch (background turn results). */
   onEnableNotifications: () => void = () => {}
+  /** 'system' | 'light' | 'dark'; the shell persists and applies it. */
+  onAppearanceChange: (mode: string) => void = () => {}
 
   aboutToAppear(): void {
     this.apiKey = this.initialKey
@@ -38,6 +42,7 @@ export struct SettingsSheet {
     this.profile = this.initialProfile === 'acp' ? 'acp' : 'sdk'
     this.permissionMode = AppConfig.normalizePermissionMode(this.initialPermission)
     this.accentId = this.initialAccent
+    this.appearance = this.initialAppearance
   }
 
   private permissionHint(mode: string): string {
@@ -124,6 +129,45 @@ export struct SettingsSheet {
           }
           .width('100%')
           .alignItems(VerticalAlign.Center)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+
+        Column({ space: 6 }) {
+          Text('外观').fontSize(12).fontColor($r('app.color.text_secondary'))
+          Row({ space: 8 }) {
+            Button('跟随系统')
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.appearance === 'system' ? this.accent : $r('app.color.surface_muted'))
+              .fontColor(this.appearance === 'system' ? Color.White : $r('app.color.text_primary'))
+              .onClick(() => {
+                this.appearance = 'system'
+                this.onAppearanceChange('system')
+              })
+            Button('浅色')
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.appearance === 'light' ? this.accent : $r('app.color.surface_muted'))
+              .fontColor(this.appearance === 'light' ? Color.White : $r('app.color.text_primary'))
+              .onClick(() => {
+                this.appearance = 'light'
+                this.onAppearanceChange('light')
+              })
+            Button('深色')
+              .layoutWeight(1)
+              .fontSize(13)
+              .backgroundColor(this.appearance === 'dark' ? this.accent : $r('app.color.surface_muted'))
+              .fontColor(this.appearance === 'dark' ? Color.White : $r('app.color.text_primary'))
+              .onClick(() => {
+                this.appearance = 'dark'
+                this.onAppearanceChange('dark')
+              })
+          }
+          .width('100%')
+          Text('切换后需重启应用生效（运行中改配色会重建窗口）')
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
         }
         .alignItems(HorizontalAlign.Start)
         .width('100%')
