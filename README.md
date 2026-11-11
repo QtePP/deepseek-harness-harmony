@@ -115,16 +115,6 @@ This repository is the **HarmonyOS shell** for [DeepSeek Harness](https://github
 | **图片输入** | 支持相册选择与系统分享 |
 | **密钥热更新** | 设置页保存 API Key 后约 2 秒生效，无需重启 |
 | **权限三档** | 只读 / 平衡 / 宽松，沙箱与审批捆绑 |
-| **垂域扩展** | 外壳只提供会话/文件/审批/设置；垂域（游戏等）独立成仓，见下方「相关仓库」 |
-
-### 相关仓库
-
-外壳不认识任何垂域概念——判据是「这块 UI 能不能被另一个垂域复用」。
-游戏（三国人生模拟：裁判引擎 + 原生棋盘 + 五个 agent pack）在
-<https://github.com/QtePP/Harmony-harness-game>（私有）。
-
-垂域要落地时照那边的做法：引擎做成随载荷分发的插件、界面放垂域仓、
-外壳一行不改。
 
 ## 架构
 
@@ -247,7 +237,6 @@ scripts/               # 载荷装配、一键部署
 | [BUILD.md](docs/BUILD.md) | 构建、签名、装机、排障 |
 | [GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) | 与桌面版的能力差距及根因 |
 | [SPIKE-ACP.md](docs/SPIKE-ACP.md) | ACP 协议实测记录 |
-| [PERSONAL-AGENT.md](docs/PERSONAL-AGENT.md) | 个人 Agent 与功能卡片演进方案 |
 | [NEEDS-ANALYSIS.md](docs/NEEDS-ANALYSIS.md) | 手机形态能力清单与需求评分 |
 | [ROADMAP.md](docs/ROADMAP.md) | 路线图 |
 
