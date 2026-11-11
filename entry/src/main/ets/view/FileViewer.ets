@@ -1,6 +1,8 @@
+import { common } from '@kit.AbilityKit'
 import { webview } from '@kit.ArkWeb'
 import { fileIo as fs } from '@kit.CoreFileKit'
 import { MdText } from './Markdown'
+import { saveToGallery } from '../common/Gallery'
 
 /** How a referenced file renders. */
 enum PreviewKind {
@@ -103,6 +105,13 @@ export struct FileViewer {
     return `file://${this.filePath}`
   }
 
+  /** Write the open image into the gallery inside the SaveButton's grant. */
+  private async saveImage(): Promise<void> {
+    const context = getContext(this) as common.UIAbilityContext
+    const message = await saveToGallery(context, this.filePath)
+    this.getUIContext().getPromptAction().showToast({ message: message, duration: 2200 })
+  }
+
   build() {
     Column() {
       Row() {
@@ -117,9 +126,32 @@ export struct FileViewer {
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
           .layoutWeight(1)
+          .margin({ left: 12 })
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ left: 12, right: 12 })
+
+        if (this.kind === PreviewKind.IMAGE && this.failed.length === 0) {
+          // Security component: the tap itself grants the temporary media
+          // write permission, which is why the shell needs no ACL for this.
+          SaveButton({
+            icon: SaveIconStyle.FULL_FILLED,
+            text: SaveDescription.SAVE_IMAGE,
+            buttonType: ButtonType.Capsule
+          })
+            .fontSize(13)
+            .height(32)
+            .onClick((event: ClickEvent, result: SaveButtonOnClickResult) => {
+              if (result !== SaveButtonOnClickResult.SUCCESS) {
+                this.getUIContext().getPromptAction().showToast({
+                  message: '未获得保存授权',
+                  duration: 1800
+                })
+                return
+              }
+              void this.saveImage()
+            })
+        }
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 10, bottom: 10 })

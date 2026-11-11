@@ -2,6 +2,7 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { ShareInbox } from '../model/ShareInbox';
+import { Notify } from '../common/Notify';
 
 const DOMAIN = 0x0000;
 
@@ -46,11 +47,14 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     // Ability has brought to foreground
+    Notify.setForeground(true);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
   }
 
   onBackground(): void {
-    // Ability has back to background
+    // Ability has back to background: this is exactly when a finished turn is
+    // worth a notification, so the flag is written before anything else.
+    Notify.setForeground(false);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
   }
 }

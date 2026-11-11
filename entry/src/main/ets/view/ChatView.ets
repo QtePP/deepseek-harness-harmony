@@ -7,6 +7,8 @@ import { attachmentNote, stagedImageHint, thumbnailLabel } from '../common/Attac
 import { NodeKind, kindAccent, kindGlyph, kindTint, kindVerb, statusLabel, toolKindOf } from '../common/TimelineNode'
 import { isWriteTool } from '../model/Rollback'
 import { TodoItem, completedCount, todoSummary } from '../model/TodoModel'
+import { goalSettled, goalStatusLabel } from '../model/GoalModel'
+import { hasSecret, maskSecrets, secretCount } from '../common/SecretMask'
 import { MdText, copyTextToClipboard } from './Markdown'
 
 /** One text or code segment produced by the minimal Markdown splitter. */
@@ -856,6 +858,8 @@ export struct MessageItem {
   @Prop @Watch('onRunningChanged') running: boolean = false
   /** Tool calls render collapsed by default; tapping the row expands the full payload. */
   @State toolExpanded: boolean = false
+  /** Credentials are masked until the user asks to see them. */
+  @State revealed: boolean = false
   /** Thinking renders collapsed by default; it is long and secondary. */
   @State reasoningExpanded: boolean = false
   /** Thought segments the user opened inside the 轨迹 drawer (by part index). */
@@ -881,6 +885,8 @@ export struct MessageItem {
   onFork: (messageId: string) => void = () => {}
   /** Quote block for the composer; the draft lives one level up. */
   onQuote: (quote: string) => void = () => {}
+  /** Re-answer this question in a fresh conversation (the shell owns sessions). */
+  onRegenerate: (messageId: string) => void = () => {}
   private previewController: webview.WebviewController = new webview.WebviewController()
 
   aboutToAppear(): void {
@@ -1327,9 +1333,9 @@ export struct MessageItem {
               .animation({ duration: 340, curve: Curve.EaseInOut })
           }
 
-          Text(`${this.thinkParts().length} 步`)
+          Text(this.traceLabel())
             .fontSize(11)
-            .fontColor($r('app.color.text_tertiary'))
+            .fontColor(this.traceLabelColor())
             .flexShrink(0)
 
           SymbolGlyph($r('sys.symbol.chevron_down'))
@@ -1604,6 +1610,100 @@ export struct MessageItem {
   }
 
   /**
+   * Text as rendered: a message carrying a key is masked until revealed.
+   *
+   * Only the display is masked — the stored text, the clipboard and a re-send
+   * all keep the real value, because a mask that leaked into the data would
+   * break the very actions the user is trying to take.
+   */
+  private displayText(): string {
+    if (this.revealed) {
+      return this.message.text
+    }
+    return maskSecrets(this.message.text)
+  }
+
+  private secretHint(): string {
+    return `已隐藏 ${secretCount(this.message.text)} 处凭据`
+  }
+
+  /**
+   * One-line summary of the run once it settles: how it ended, how many steps,
+   * how long. The desktop collapses a finished turn into exactly this line;
+   * while the turn is live the count is enough, because the number is still
+   * moving.
+   */
+  private traceLabel(): string {
+    const steps = this.thinkParts().length
+    if (steps === 0) {
+      return ''
+    }
+    if (this.running) {
+      return `${steps} 步`
+    }
+    let failed = false
+    let open = false
+    for (const entry of this.message.trace) {
+      if (entry.status === 'failed') {
+        failed = true
+      } else if (entry.status !== 'completed') {
+        open = true
+      }
+    }
+    const duration = this.runDuration()
+    if (failed) {
+      return `有失败 · ${steps} 步${duration}`
+    }
+    if (open) {
+      return `已中断 · ${steps} 步${duration}`
+    }
+    return `已完成 · ${steps} 步${duration}`
+  }
+
+  private traceLabelColor(): ResourceColor {
+    if (this.running) {
+      return $r('app.color.text_tertiary')
+    }
+    for (const entry of this.message.trace) {
+      if (entry.status === 'failed') {
+        return $r('app.color.status_danger')
+      }
+    }
+    return $r('app.color.text_tertiary')
+  }
+
+  /** Wall-clock span of the trace: first call started → last call settled. */
+  private runDuration(): string {
+    const trace = this.message.trace
+    if (trace.length === 0) {
+      return ''
+    }
+    let start = 0
+    let end = 0
+    for (const entry of trace) {
+      if (entry.at > 0 && (start === 0 || entry.at < start)) {
+        start = entry.at
+      }
+      const settled = entry.doneAt > 0 ? entry.doneAt : entry.at
+      if (settled > end) {
+        end = settled
+      }
+    }
+    if (start <= 0 || end <= start) {
+      return ''
+    }
+    const ms = end - start
+    if (ms < 1000) {
+      return ''
+    }
+    if (ms < 60000) {
+      return ` · ${(ms / 1000).toFixed(1)}s`
+    }
+    const total = Math.round(ms / 1000)
+    return ` · ${Math.floor(total / 60)}m${total % 60}s`
+  }
+
+  /**
    * Label above the bubble. Image turns get prose instead of the stored
    * literal; every other note (tool names, usage digests) passes through.
    */
@@ -1639,6 +1739,20 @@ export struct MessageItem {
   }
 
   /**
+   * Long-press an image: open it full screen, where the viewer owns the save
+   * button. Saving needs a security component's temporary grant, so the tap
+   * belongs next to the image being saved rather than in a menu two steps away.
+   */
+  private promptImage(path: string): void {
+    if (path.length === 0) {
+      return
+    }
+    const slash = path.lastIndexOf('/')
+    const ref: FileRef = { path: path, name: slash >= 0 ? path.substring(slash + 1) : path }
+    this.onOpenFile(ref)
+  }
+
+  /**
    * Long-press menu: copy the text, fork a new branch here, or roll the
    * transcript (and the files the turn wrote) back to before this message.
    * Rollback is destructive, so it asks first.
@@ -1670,6 +1784,10 @@ export struct MessageItem {
         {
           title: '从此处分支（保留原会话）',
           action: () => this.onFork(this.message.id)
+        },
+        {
+          title: '重新回答（新会话）',
+          action: () => this.onRegenerate(this.message.id)
         },
         {
           title: '回撤到这条消息之前',
@@ -1730,6 +1848,7 @@ export struct MessageItem {
                 .objectFit(ImageFit.Cover)
                 .borderRadius(12)
                 .margin(4)
+                .gesture(LongPressGesture().onAction(() => this.promptImage(path)))
             }, (path: string) => path)
           }
           .width('100%')
@@ -1739,6 +1858,7 @@ export struct MessageItem {
             .height(150)
             .objectFit(ImageFit.Cover)
             .borderRadius(14)
+            .gesture(LongPressGesture().onAction(() => this.promptImage(this.message.image)))
         }
 
         if (this.message.reasoning.length > 0 || this.message.trace.length > 0) {
@@ -1748,9 +1868,9 @@ export struct MessageItem {
         if (this.message.text.length > 0) {
           Column({ space: 8 }) {
             if (this.message.role === Role.ASSISTANT) {
-              MdText({ raw: this.message.text })
+              MdText({ raw: this.displayText() })
             } else {
-              ForEach(segmentsOf(this.message.text), (segment: Segment) => {
+              ForEach(segmentsOf(this.displayText()), (segment: Segment) => {
                 if (segment.code) {
                   Text(segment.text)
                     .fontSize(13)
@@ -1776,6 +1896,23 @@ export struct MessageItem {
           .borderRadius(this.hasBubble() ? 16 : 0)
           .constraintSize({ maxWidth: '92%' })
           .gesture(LongPressGesture().onAction(() => this.openActions()))
+        }
+
+        if (hasSecret(this.message.text)) {
+          Row({ space: 6 }) {
+            SymbolGlyph($r('sys.symbol.eye_slash'))
+              .fontSize(12)
+              .fontColor([$r('app.color.text_tertiary')])
+            Text(this.revealed ? '隐藏凭据' : this.secretHint())
+              .fontSize(11)
+              .fontColor($r('app.color.text_tertiary'))
+          }
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius(8)
+          .onClick(() => {
+            this.revealed = !this.revealed
+          })
         }
 
         if (this.refs().length > 0) {
@@ -1844,6 +1981,9 @@ export struct ChatView {
   @Prop queued: string[] = []
   /** The model's standing plan, projected from its latest `todo_write`. */
   @Prop todos: TodoItem[] = []
+  /** Standing objective, projected from the goal tools; '' hides the bar. */
+  @Prop goalObjective: string = ''
+  @Prop goalStatus: string = ''
   /** Collapsed by default: the bar names the current step, the list is one tap away. */
   @State todoExpanded: boolean = false
   /** Phones have no rail: show a top-bar entry that opens the sessions sheet. */
@@ -1864,6 +2004,8 @@ export struct ChatView {
   onDequeue: (index: number) => void = () => {}
   /** Cut the running turn short so the queue goes out now. */
   onSendNow: () => void = () => {}
+  /** Re-answer a question in a fresh conversation. */
+  onRegenerate: (messageId: string) => void = () => {}
   /**
    * Send is allowed whenever there is something to send. A live turn no longer
    * blocks the composer: the tap queues the message and the shell sends it the
@@ -2136,6 +2278,53 @@ export struct ChatView {
       }
       .width('100%')
       .height('100%')
+    }
+  }
+
+  /**
+   * The objective bar, above the plan bar.
+   *
+   * A goal is longer-lived than a todo list and usually one line: "把首页改成
+   * 深色". Read-only, because editing means `goals/*` mutations that ACP does
+   * not carry — but seeing it is what lets the user judge whether the turn in
+   * front of them is still on the point.
+   */
+  @Builder
+  goalDock() {
+    if (this.goalObjective.length > 0) {
+      Row({ space: 8 }) {
+        Text('目标')
+          .fontSize(11)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_tertiary'))
+          .letterSpacing(0.5)
+          .flexShrink(0)
+
+        Text(goalStatusLabel(this.goalStatus))
+          .fontSize(10)
+          .fontColor(goalSettled(this.goalStatus) ?
+            $r('app.color.text_tertiary') : $r('app.color.brand'))
+          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius(6)
+          .flexShrink(0)
+
+        Text(this.goalObjective)
+          .fontSize(12)
+          .fontColor(goalSettled(this.goalStatus) ?
+            $r('app.color.text_tertiary') : $r('app.color.text_secondary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .backgroundColor($r('app.color.surface'))
+      .borderRadius(12)
+      .transition(TransitionEffect.OPACITY
+        .combine(TransitionEffect.translate({ y: 6 }))
+        .animation({ duration: 220, curve: Curve.EaseOut }))
     }
   }
 
@@ -2520,7 +2709,8 @@ export struct ChatView {
                   onFork: this.onFork,
                   onQuote: (quote: string) => {
                     this.draft = this.draft.length > 0 ? `${quote}\n\n${this.draft}` : `${quote}\n\n`
-                  }
+                  },
+                  onRegenerate: this.onRegenerate
                 })
               }
             }, (item: ChatMessage) => item.id)
@@ -2572,6 +2762,8 @@ export struct ChatView {
             .combine(TransitionEffect.translate({ y: 10 }))
             .animation({ duration: 220, curve: Curve.EaseOut }))
         }
+
+        this.goalDock()
 
         this.todoDock()
 

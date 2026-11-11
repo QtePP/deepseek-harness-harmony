@@ -177,8 +177,16 @@ ACP 实测契约（勿凭直觉改）：
   `TodoItem[]`（`model/TodoModel.ets`），常驻输入框上方，冷启动/切会话按持久化轨迹
   `refreshTodos()` 重建，不依赖服务端投影通道；③**上下文小环**——从 `usage_update` 的
   「上下文 used/size」注记算占用率（70%/90% 两档变色），点开 toast 给精确值；④**引用追问**
-  ——长按消息 ›「引用到输入框」生成 `>` 引用块；⑤**会话搜索**——会话栏顶部按标题过滤。
-  本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 30 文件 + LocalUnit 40.6% 行覆盖）。
+  ——长按消息 ›「引用到输入框」生成 `>` 引用块；⑤**会话搜索**——会话栏顶部按标题过滤；
+  ⑥**目标条（只读）**——`create_goal`/`update_goal` 参数投影（`model/GoalModel.ets`），与待办条
+  同法重建，编辑动作在 ACP 无通道故只读；⑦**重新回答**——保留到该问题前的历史，新会话重发，
+  原会话不动（ACP 服务端上下文从本轮重启，toast 明说）；⑧**完成摘要**——轨迹条收成
+  「已完成 · N 步 · 8.4s」，失败/中断分别转红与标注；⑨**凭据遮挡**——`common/SecretMask.ets`
+  只遮挡渲染（前 8 位 + 可展开），存储/复制/重发保真；⑩**系统通知**——后台时一轮完成/出错/
+  待审批发本地通知（`common/Notify.ets`，前台不发、首次用才要授权）；⑪**图片存相册**——
+  全屏查看器用 `SaveButton` 安全组件换临时媒体写权限再 `createAsset`，不申请受限权限
+  （`common/Gallery.ets`）。
+  本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 35 文件 + LocalUnit 构建通过）。
 - **in-process PTC 运行时已交付并真机闭环（2026-10-27，P1①）**：
   `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
   `dsh-bundle-ohos` patch 禁 stock `ptc-runtime`；`tools` 行现为 `mode: native`

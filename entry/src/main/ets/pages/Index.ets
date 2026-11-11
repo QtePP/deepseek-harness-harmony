@@ -16,6 +16,8 @@ import { DirGrant } from '../host/DirGrant'
 import { ShareInbox } from '../model/ShareInbox'
 import { FileTouch, RollbackReport, SnapshotStore, writePathsOf } from '../model/Rollback'
 import { TodoItem, isTodoTool, todosFromJson, todosFromRaw } from '../model/TodoModel'
+import { GoalState, goalFromJson, goalFromRaw, isGoalTool } from '../model/GoalModel'
+import { Notify } from '../common/Notify'
 import { EventLike, LinkState, SessionEventPayload, SessionStatusPayload } from '../model/Protocol'
 import {
   AcpConfigOption, AcpContentBlock, AcpModelChoice, AcpPermissionRequest, AcpSessionNewResult,
@@ -140,6 +142,9 @@ struct Index {
   @State queued: QueuedTurn[] = []
   /** The model's standing plan, projected from its latest `todo_write`. */
   @State todos: TodoItem[] = []
+  /** Standing objective, projected from the goal tools (read-only bar). */
+  @State goalObjective: string = ''
+  @State goalStatus: string = ''
 
   private host: NodeHost = NodeHost.get()
   private store: SessionStore = new SessionStore()
@@ -231,6 +236,7 @@ struct Index {
   private async init(): Promise<void> {
     const context = getContext(this) as common.UIAbilityContext
     this.context = context
+    Notify.attach(context)
     await AppConfig.load(context)
     await PluginConfig.load(context)
     this.pluginRows = PluginCatalog.rows(PluginConfig.disabled)
@@ -282,6 +288,8 @@ struct Index {
       this.messages = []
       this.title = '新会话'
       this.todos = []
+      this.goalObjective = ''
+      this.goalStatus = ''
       return
     }
     const latest = this.sessions[0]
@@ -289,6 +297,7 @@ struct Index {
     this.messages = await this.store.load(latest.id)
     this.title = latest.title
     this.refreshTodos()
+    this.refreshGoal()
   }
 
   private async boot(): Promise<void> {
@@ -351,6 +360,7 @@ struct Index {
           this.todos = plan
         }
       }
+      this.applyGoal(name, args)
       if (this.traceRow === null) {
         // The trace rides the assistant row this turn's thinking lives on;
         // a call before any message gets a fresh host row.
@@ -400,6 +410,12 @@ struct Index {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, text, note))
       }
       void this.persist()
+      if (reason !== undefined && reason.error !== undefined) {
+        void Notify.turnFailed(this.latestAnswerLine().length > 0
+          ? this.latestAnswerLine() : '回合失败')
+      } else {
+        void Notify.turnFinished(this.latestAnswerLine())
+      }
       // SDK profile: the prompt returned a receipt long ago, so the settle is
       // this event. A queued message waits exactly for it.
       this.flushQueue()
@@ -578,6 +594,66 @@ struct Index {
   }
 
   /**
+   * Re-answer a question in a fresh conversation, leaving the original intact.
+   *
+   * dsh-go puts ↻ on the last reply and regenerates in a new conversation, so
+   * the old answer stays available for comparison. The new conversation keeps
+   * the transcript up to (not including) the question and re-sends it; on ACP
+   * the server-side context starts over, which the toast says out loud rather
+   * than letting the model silently lose the earlier turns.
+   */
+  private async regenerate(messageId: string): Promise<void> {
+    if (this.running) {
+      this.getUIContext().getPromptAction().showToast({
+        message: '本轮仍在进行，结束后再重新回答',
+        duration: 2400
+      })
+      return
+    }
+    const index = this.messageIndex(messageId)
+    if (index < 0) {
+      return
+    }
+    let userIndex = -1
+    for (let i = index; i >= 0; i--) {
+      if (this.messages[i].role === Role.USER) {
+        userIndex = i
+        break
+      }
+    }
+    if (userIndex < 0) {
+      return
+    }
+    const question = this.messages[userIndex]
+    const text = question.text
+    const images = question.images.slice()
+    if (text.trim().length === 0 && images.length === 0) {
+      return
+    }
+    await this.persist()
+    const kept = this.messages.slice(0, userIndex)
+    const freshId = newSessionId()
+    const freshTitle = `${this.title.length > 0 ? this.title : '会话'} · 重答`
+    await this.store.save(freshId, this.currentProjectId, freshTitle, kept)
+    this.currentId = freshId
+    this.title = freshTitle
+    this.messages = kept
+    this.openedSessions.delete(freshId)
+    this.traceRow = null
+    this.toolRows.clear()
+    this.liveAssistant = null
+    this.queued = []
+    this.refreshTodos()
+    this.refreshGoal()
+    this.sessions = await this.store.list(this.currentProjectId)
+    this.getUIContext().getPromptAction().showToast({
+      message: '已在新会话重新提问；原会话保留，服务端上下文从本轮重新开始',
+      duration: 3000
+    })
+    await this.send(text, images)
+  }
+
+  /**
    * Replace the server-side session with one built from the shortened
    * transcript. `session/close` retires the old id; the next prompt lazily
    * opens a fresh session whose history is exactly what is on screen.
@@ -649,6 +725,17 @@ struct Index {
     } finally {
       this.openingSessions.delete(id)
     }
+  }
+
+  /** First line of the newest answer, used as a notification body. */
+  private latestAnswerLine(): string {
+    for (let index = this.messages.length - 1; index >= 0; index--) {
+      const message = this.messages[index]
+      if (message.role === Role.ASSISTANT && message.text.trim().length > 0) {
+        return message.text.trim().split('\n')[0]
+      }
+    }
+    return ''
   }
 
   private async send(text: string, attachPaths: string[]): Promise<void> {
@@ -757,6 +844,57 @@ struct Index {
       }
     }
     this.todos = []
+  }
+
+  /** Current goal as the projection helper expects it. */
+  private goalState(): GoalState | null {
+    if (this.goalObjective.length === 0) {
+      return null
+    }
+    const state: GoalState = { objective: this.goalObjective, status: this.goalStatus }
+    return state
+  }
+
+  private setGoal(state: GoalState): void {
+    this.goalObjective = state.objective
+    this.goalStatus = state.status
+  }
+
+  /** SDK profile carries the arguments as a JSON string, not an object. */
+  private applyGoal(name: string, args: string): void {
+    if (!isGoalTool(name)) {
+      return
+    }
+    const goal = goalFromJson(this.goalState(), name, args)
+    if (goal !== null) {
+      this.setGoal(goal)
+    }
+  }
+
+  /**
+   * Rebuild the goal bar from the transcript, newest tool call first.
+   *
+   * Same trick as the todo bar: the arguments live in the persisted trace, so a
+   * reopened conversation shows the objective it ended on and a conversation
+   * with no goal call clears the bar instead of inheriting the last one.
+   */
+  private refreshGoal(): void {
+    this.goalObjective = ''
+    this.goalStatus = ''
+    for (let index = this.messages.length - 1; index >= 0; index--) {
+      const trace = this.messages[index].trace
+      for (let entry = trace.length - 1; entry >= 0; entry--) {
+        if (!isGoalTool(trace[entry].name)) {
+          continue
+        }
+        const goal = goalFromJson(this.goalState(), trace[entry].name, trace[entry].input)
+        if (goal !== null) {
+          this.setGoal(goal)
+          // The newest goal-writing call wins; earlier ones are history.
+          return
+        }
+      }
+    }
   }
 
   /** Queued texts in the shape the composer strip renders. */
@@ -939,6 +1077,11 @@ struct Index {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `回合结束：${stop}`, '结束'))
       }
       void this.persist()
+      if (stop !== 'cancelled') {
+        // A cancelled turn was the user's own decision; only an answer they
+        // were not watching deserves a tap on the shoulder.
+        void Notify.turnFinished(this.latestAnswerLine())
+      }
     } catch (error) {
       this.turnInFlight = false
       this.running = false
@@ -958,6 +1101,7 @@ struct Index {
           '当前连接未开放图片输入：需默认模型为 DeepSeek-V4.1-Flash 并重启应用。', '提示'))
       } else {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `发送失败：${message}`, '错误'))
+        void Notify.turnFailed(message)
       }
     }
   }
@@ -1232,6 +1376,10 @@ struct Index {
           this.todos = plan
         }
       }
+      const goal = goalFromRaw(this.goalState(), name, update.rawInput)
+      if (goal !== null) {
+        this.setGoal(goal)
+      }
       if (entry.status === 'completed' || entry.status === 'failed') {
         entry.doneAt = Date.now()
       }
@@ -1295,6 +1443,7 @@ struct Index {
     }
     this.approvalText = title
     this.approvalVisible = true
+    void Notify.needsYou(`工具请求审批：${title}`)
   }
 
   private answerApproval(allow: boolean): void {
@@ -1499,6 +1648,8 @@ struct Index {
       this.toolRows.clear()
       this.queued = []
       this.todos = []
+      this.goalObjective = ''
+      this.goalStatus = ''
       this.showSessions = false
       return
     }
@@ -1508,6 +1659,8 @@ struct Index {
     this.running = false
     this.queued = []
     this.todos = []
+    this.goalObjective = ''
+    this.goalStatus = ''
     this.showSessions = false
   }
 
@@ -1542,6 +1695,7 @@ struct Index {
     }
     this.queued = []
     this.refreshTodos()
+    this.refreshGoal()
   }
 
   /**
@@ -1579,6 +1733,8 @@ struct Index {
     this.toolRows.clear()
     this.queued = []
     this.todos = []
+    this.goalObjective = ''
+    this.goalStatus = ''
     if (this.sessions.length === 0) {
       this.currentId = newSessionId()
       this.messages = []
@@ -1591,6 +1747,7 @@ struct Index {
     this.messages = await this.store.load(latest.id)
     this.title = latest.title
     this.refreshTodos()
+    this.refreshGoal()
   }
 
   /**
@@ -2083,6 +2240,8 @@ struct Index {
                 attachPaths: this.attachPaths,
                 queued: this.queuedTexts(),
                 todos: this.todos,
+                goalObjective: this.goalObjective,
+                goalStatus: this.goalStatus,
                 onSend: (text: string, attachPaths: string[]) => {
                   void this.send(text, attachPaths)
                 },
@@ -2103,6 +2262,9 @@ struct Index {
                 onStop: () => this.stopAcp(),
                 onDequeue: (index: number) => this.dequeueAt(index),
                 onSendNow: () => this.sendQueuedNow(),
+                onRegenerate: (messageId: string) => {
+                  void this.regenerate(messageId)
+                },
                 onOpenFile: (ref: FileRef) => this.openFile(ref),
                 onResolveFile: (ref: FileRef) => this.resolveFile(ref),
                 onForeignProject: (resolved: string) => this.foreignProjectOf(resolved),
@@ -2149,6 +2311,8 @@ struct Index {
                 attachPaths: this.attachPaths,
                 queued: this.queuedTexts(),
                 todos: this.todos,
+                goalObjective: this.goalObjective,
+                goalStatus: this.goalStatus,
                 onSend: (text: string, attachPaths: string[]) => {
                   void this.send(text, attachPaths)
                 },
@@ -2172,6 +2336,9 @@ struct Index {
                 onStop: () => this.stopAcp(),
                 onDequeue: (index: number) => this.dequeueAt(index),
                 onSendNow: () => this.sendQueuedNow(),
+                onRegenerate: (messageId: string) => {
+                  void this.regenerate(messageId)
+                },
                 onOpenFile: (ref: FileRef) => this.openFile(ref),
                 onResolveFile: (ref: FileRef) => this.resolveFile(ref),
                 onForeignProject: (resolved: string) => this.foreignProjectOf(resolved),
