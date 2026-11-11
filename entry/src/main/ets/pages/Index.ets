@@ -27,9 +27,6 @@ import { FileViewer } from '../view/FileViewer'
 import { FilesPanel } from '../view/FilesPanel'
 import { SessionRail } from '../view/SessionRail'
 import { SettingsSheet } from '../view/SettingsSheet'
-import { BoardState, SceneOption, boardAvailable, readBoard } from '../model/SanguoBoard'
-import { RunStats, readRunStats } from '../model/SanguoRun'
-import { SanguoBoard } from '../view/SanguoBoardView'
 
 /** dsh pass-through admission budget: encoded bytes and decoded pixels per image. */
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024
@@ -116,35 +113,6 @@ struct Index {
   /** Share prefill landing in the composer (absorbed once by ChatView). */
   @State shareText: string = ''
   @State attachPaths: string[] = []
-  /**
-   * The Sanguo board, read from `.sanguo/life.json` in the current workspace.
-   *
-   * Refreshed when a turn settles rather than polled: the engine rewrites the
-   * projection at the end of every tool call, so "turn ended" is exactly the
-   * moment the file is worth re-reading. Polling would burn battery to discover
-   * the same thing a second later.
-   */
-  @State board: BoardState = new BoardState()
-  /**
-   * Counters and the drift trail for the current run, read from the save and
-   * the append-only history. Kept beside `board` rather than inside it because
-   * the projection is a per-turn snapshot while these are the run's totals.
-   */
-  @State run: RunStats = new RunStats()
-  /** Whether the board (rather than the transcript) is showing. */
-  @State showBoard: boolean = false
-  /** A board-issued action is in flight; guards double taps. */
-  @State boardBusy: boolean = false
-  /**
-   * Whether this workspace can host a board at all.
-   *
-   * Distinct from `board.present` (a run exists): a fresh sanguo workspace has
-   * no run yet, and the empty state is exactly where "开始这一局" lives. Keying
-   * the switch on `board.present` alone made the board unreachable before the
-   * first run — a deadlock the user would have had to break by typing "开始"
-   * into the chat.
-   */
-  @State boardAvailable: boolean = false
 
   private host: NodeHost = NodeHost.get()
   private store: SessionStore = new SessionStore()
@@ -277,9 +245,6 @@ struct Index {
     // persisted conversation opens one immediately so the first prompt and
     // the model picker have a live session to target.
     await this.ensureAcpCurrentSession()
-    // An existing run must be on screen right after launch, not only after the
-    // next turn settles.
-    this.refreshBoard()
   }
 
   /** Cold start / project switch: open the most recent conversation of the current project. */
@@ -392,7 +357,6 @@ struct Index {
 
     if (type === 'turn/end') {
       this.running = false
-      this.refreshBoard()
       const reason = event.data?.reason
       if (reason !== undefined && reason.error !== undefined) {
         const err = reason.error
@@ -480,64 +444,6 @@ struct Index {
   /** Close the running turn; snapshots stay so it can still be rolled back. */
   private endTurn(): void {
     this.activeTurnKey = ''
-    this.refreshBoard()
-  }
-
-  /**
-   * Re-read the Sanguo projection for the current workspace.
-   *
-   * Cheap enough to call on every turn settle: one `accessSync` when the
-   * workspace has no run, one small `readTextSync` when it does. The result is a
-   * fresh immutable object, so the board re-renders only when something in it
-   * actually changed.
-   */
-  private refreshBoard(): void {
-    const workspace = this.workspaceOf(this.currentProjectId)
-    if (workspace.length === 0) {
-      this.board = new BoardState()
-      this.run = new RunStats()
-      this.boardAvailable = false
-      return
-    }
-    this.board = readBoard(workspace)
-    this.run = readRunStats(workspace)
-    this.boardAvailable = boardAvailable(workspace)
-  }
-
-  /**
-   * Send one board-issued prompt.
-   *
-   * Board actions are ordinary prompts — there is no second channel into the
-   * engine, on purpose. Anything the board can do, the user could have typed;
-   * the board only saves the typing. That keeps one code path for turn
-   * lifecycle, one for persistence, and one for rollback.
-   */
-  private async boardAct(prompt: string): Promise<void> {
-    if (this.boardBusy || this.running) {
-      return
-    }
-    this.boardBusy = true
-    try {
-      await this.send(prompt, [])
-    } finally {
-      this.boardBusy = false
-    }
-  }
-
-  /** Start (or restart) a run, then show the board. */
-  private async boardStart(): Promise<void> {
-    this.showBoard = true
-    await this.boardAct('开始')
-  }
-
-  /** Pick one declared option by id; the engine, not the UI, resolves it. */
-  private async boardChoose(option: SceneOption): Promise<void> {
-    await this.boardAct(`选「${option.label}」`)
-  }
-
-  /** Let the world run one season. */
-  private async boardWait(): Promise<void> {
-    await this.boardAct('我什么都不做，等一等')
   }
 
   /**
@@ -1705,7 +1611,6 @@ struct Index {
 
   /** Switch category: park the current conversation, then load the target's. */
   private async selectProject(id: string): Promise<void> {
-    this.refreshBoard()
     if (id === this.currentProjectId) {
       return
     }
@@ -2062,109 +1967,12 @@ struct Index {
                     this.showFiles = false
                   }
                 })
-
-              // Tablet / 2in1: the board is a column, not a mode.
-              //
-              // At 840vp there is room for the chronicle beside the transcript,
-              // and the two belong together: the board shows the state, the
-              // transcript shows how you got there. Collapsing them into one
-              // surface here would throw away the width the device has.
-              if (this.boardAvailable) {
-                Divider().vertical(true).color($r('app.color.rule'))
-                Column() {
-                  SanguoBoard({
-                    board: this.board,
-                    run: this.run,
-                    running: this.running,
-                    busy: this.boardBusy,
-                    onChoose: (option: SceneOption) => {
-                      void this.boardChoose(option)
-                    },
-                    onFreeAction: () => {
-                      void this.boardAct('去做')
-                    },
-                    onWait: () => {
-                      void this.boardWait()
-                    },
-                    onStart: () => {
-                      void this.boardStart()
-                    }
-                  })
-                }
-                .width(340)
-                .height('100%')
-              }
             }
             .width('100%')
             .height('100%')
           } else {
             Column() {
-              // The mode switch lives at the TOP, not above the composer: the
-              // bottom strip is the system gesture zone, and a 40vp control
-              // there loses taps to the home indicator.
-              //
-              // Only rendered when this workspace actually has a run — a board
-              // tab on every project would be chrome pretending to be a feature.
-              if (this.boardAvailable || this.showBoard) {
-                Row() {
-                  Text('对局')
-                    .fontSize(13)
-                    .fontColor(this.showBoard ? $r('app.color.ink_faint') : $r('app.color.ink'))
-                    .layoutWeight(1)
-                    .height(36)
-                    .textAlign(TextAlign.Center)
-                    .backgroundColor(this.showBoard ? Color.Transparent : $r('app.color.paper_raised'))
-                    .borderRadius(7)
-                    .onClick(() => {
-                      this.showBoard = false
-                    })
-
-                  Text('这一局')
-                    .fontSize(13)
-                    .fontColor(this.showBoard ? $r('app.color.ink') : $r('app.color.ink_faint'))
-                    .layoutWeight(1)
-                    .height(36)
-                    .textAlign(TextAlign.Center)
-                    .backgroundColor(this.showBoard ? $r('app.color.paper_raised') : Color.Transparent)
-                    .borderRadius(7)
-                    .onClick(() => {
-                      this.refreshBoard()
-                      this.showBoard = true
-                    })
-                }
-                .width('100%')
-                .padding(3)
-                .margin({ left: 16, right: 16, top: 6, bottom: 6 })
-                .backgroundColor($r('app.color.paper_sunken'))
-                .borderRadius(9)
-              }
-
-              // Phone: one surface at a time. The board replaces the transcript
-              // rather than sitting beside it — a 360vp screen cannot hold a
-              // chronicle column and a chat column without shrinking both into
-              // unreadability.
-              if (this.showBoard) {
-                SanguoBoard({
-                  board: this.board,
-                  run: this.run,
-                  running: this.running,
-                  busy: this.boardBusy,
-                  onChoose: (option: SceneOption) => {
-                    void this.boardChoose(option)
-                  },
-                  onFreeAction: () => {
-                    void this.boardAct('去做')
-                  },
-                  onWait: () => {
-                    void this.boardWait()
-                  },
-                  onStart: () => {
-                    void this.boardStart()
-                  }
-                })
-                  .layoutWeight(1)
-              } else {
-                ChatView({
+              ChatView({
                 messages: $messages,
                 running: this.running,
                 title: this.title,
@@ -2215,17 +2023,14 @@ struct Index {
                   void this.forkFrom(messageId)
                 }
               })
-                .layoutWeight(1)
-                .bindSheet($$this.showFiles, this.filesSheet(), {
-                  height: SheetSize.LARGE,
-                  dragBar: true,
-                  showClose: false,
-                  onDisappear: () => {
-                    this.showFiles = false
-                  }
-                })
-              }
-
+              .bindSheet($$this.showFiles, this.filesSheet(), {
+                height: SheetSize.LARGE,
+                dragBar: true,
+                showClose: false,
+                onDisappear: () => {
+                  this.showFiles = false
+                }
+              })
             }
             .width('100%')
             .height('100%')

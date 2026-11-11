@@ -7,13 +7,7 @@
 
 ### 新增
 
-- **三国裁判引擎** `@ohos/dsh-sanguo`：掷骰（xorshift32，状态存存档内，重载刷不了骰）、
-  判成败（难度夹在 10–95，模型建议只作 hint）、算数值、推演势力、记人物记忆、算「势」。
-  五个工具 `sanguo_new / status / choose / act / advance`。
-- **三国棋盘原生视图** `SanguoBoardView.ets`：读 `.sanguo/life.json` 投影；手机顶部切换器单栏、
-  平板 340vp 右栏双栏；选项在点击前就显示代价。
-- **五个 Agent pack**（`agents/`）：`match-coach`、`openworld-guide`、`story-guide`、
-  `sanguo-guide`、`sanguo-life`，配 `scripts/check-agent-pack.mjs` 校验。
+- **一条命令跑全部检查** `scripts/test.sh`：payload 单测 / ArkTS 检查 / LocalUnit / 设备端 ohosTest。
 - **商店截图** `store-assets/screenshots/`：5 张 1080×1920，从真机状态实拍合成。
 
 ### 修复

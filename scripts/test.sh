@@ -114,7 +114,7 @@ suite_unit() {
     skip "payload 树不存在，先跑 node scripts/assemble-payload.mjs"
     return
   fi
-  local suites="dsh-tool-fs-search-js dsh-ptc-runtime-vm dsh-credentials-live dsh-sanguo"
+  local suites="dsh-tool-fs-search-js dsh-ptc-runtime-vm dsh-credentials-live"
   for name in $suites; do
     local dir="$PAYLOAD/$name"
     if [ ! -d "$dir/test" ]; then
@@ -134,7 +134,7 @@ suite_unit() {
       bad "$name"
       printf '%s\n' "$out" | grep -E '^not ok|^✖|(^ℹ|^#) fail' | head -8
     fi
-    if [ "$RUN_JITLESS" = "1" ] && { [ "$name" = "dsh-ptc-runtime-vm" ] || [ "$name" = "dsh-sanguo" ]; }; then
+    if [ "$RUN_JITLESS" = "1" ] && [ "$name" = "dsh-ptc-runtime-vm" ]; then
       # --jitless proves the engine has no WASM path, which is the device's
       # only execution mode. A suite that passes only with JIT is a suite that
       # will fail on the phone.
