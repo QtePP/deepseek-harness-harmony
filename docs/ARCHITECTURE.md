@@ -64,6 +64,9 @@ EntryAbility → Index.aboutToAppear
 第 5 步的顺序是刻意的：`bootstrap.cjs` **只在有客户端连入时才启动 dsh**，这样 dsh 的
 stdout 从第一帧起就有接收方，不会丢初始化输出。
 
+逐行、逐垫片的完整走读见 [BOOT.md](BOOT.md)：它把上面 7 步拆到函数级，并解释每个
+`host/*.cjs` 对应哪条平台约束。
+
 ## 协议面（客户端 5 个请求 + 服务端 4 个通知）
 
 客户端 → 服务端（`model/DshClient.ets`）：
