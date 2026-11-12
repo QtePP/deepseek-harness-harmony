@@ -7,6 +7,10 @@
 
 ### 新增
 
+- **分享卡（回复分享为图片）**：长按回复 ›「分享为图片」，用 `componentSnapshot` 把这条气泡渲染成
+  PNG，再经 ShareKit 打开系统分享面板（真机实测：面板显示「分享 1 项 · 16.82 KB」）。
+  **踩坑**：`SharedRecord.uri` 必须用 `fileUri.getUriFromPath()` 生成，手拼 `file:///data/...`
+  会在 `show()` 时报 `IPC data is oversized`；图片分享被拒时自动退到「分享文字」。
 - **桌面快捷方式「新对话」**：`shortcuts.json` + `ohos.ability.shortcuts` 元数据，want 携带
   `shortcutId`；`EntryAbility` 经 `AppStorage` 把请求交给页面，冷启动与 `onNewWant` 都能开新会话
   （已用 `aa start --ps shortcutId new_chat` 验证打开的是「新会话」）。**桌面长按菜单里没显示该
@@ -56,6 +60,8 @@
 
 ### 修复
 
+- **短会话停在顶部、下面一大片空白**（真机发现）：`scrollToIndex` 默认把目标项对齐到视口**顶部**，
+  消息少时整段对话被顶到上面。改为 `ScrollAlign.END`。
 - **对话里的图片长按没反应**（真机发现）：消息行自己挂了一个长按手势（操作菜单），子节点 `Image`
   上的普通 `LongPressGesture` 会被父手势吞掉。改成 `priorityGesture`。
 - **全屏查看器的顶栏落在状态栏里**（真机发现）：`bindContentCover` 在本机是全屏绘制，顶栏

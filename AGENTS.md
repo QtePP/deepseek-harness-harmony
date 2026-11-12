@@ -205,9 +205,12 @@ ACP 实测契约（勿凭直觉改）：
   **桌面快捷方式「新对话」**：`shortcuts.json`（profile）+ `ohos.ability.shortcuts` 元数据 +
   `AppStorage['pendingShortcut']` 交给页面；`aa start --ps shortcutId new_chat` 实测打开「新会话」。
   桌面长按菜单未显示该条目（启动器行为），功能路径已验证。
-  **图片存相册只验到入口**：长按对话图片 → 全屏查看器（修了父手势吞子手势与顶栏落进状态栏两个
-  真机缺陷）→ 「保存图片」按钮位置正确；**点它没有 toast、相册里也没有新文件**——安全组件
-  （SaveButton）很可能不认注入点击，需要在屏幕上真手点一次才能确认。
+  **图片存相册已真机验成（真手）**：长按对话图片 → 全屏查看器（修了父手势吞子手势与顶栏落进
+  状态栏两个真机缺陷）→ 点「保存图片」→ 弹出系统授权框 → toast「已保存到相册」。
+  **自动化点不动它**：`SaveButton` 是安全组件，`uitest` 注入点击不触发授权，只能真手验。
+  **分享卡已真机验成**：长按回复 ›「分享为图片」→ 系统分享面板显示「分享 1 项 · 16.82 KB」；
+  记录一条契约：`SharedRecord.uri` 必须用 `fileUri.getUriFromPath()`，手拼 `file:///data/...`
+  会被 `show()` 以 `IPC data is oversized` 拒绝。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。

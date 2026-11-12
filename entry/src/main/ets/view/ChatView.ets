@@ -10,6 +10,8 @@ import { TodoItem, completedCount, todoSummary } from '../model/TodoModel'
 import { goalSettled, goalStatusLabel } from '../model/GoalModel'
 import { hasSecret, maskSecrets, secretCount } from '../common/SecretMask'
 import { matchWorkspaceFiles } from '../common/WorkspaceFiles'
+import { shareMessageCard } from '../common/ShareCard'
+import { common } from '@kit.AbilityKit'
 import { MdText, copyTextToClipboard } from './Markdown'
 
 /** One text or code segment produced by the minimal Markdown splitter. */
@@ -919,6 +921,8 @@ export struct MessageItem {
   onQuote: (quote: string) => void = () => {}
   /** Re-answer this question in a fresh conversation (the shell owns sessions). */
   onRegenerate: (messageId: string) => void = () => {}
+  /** Share this bubble as a picture (the shell owns snapshot + ShareKit). */
+  onShareCard: (messageId: string) => void = () => {}
   private previewController: webview.WebviewController = new webview.WebviewController()
 
   aboutToAppear(): void {
@@ -1814,6 +1818,10 @@ export struct MessageItem {
           action: () => this.quoteMessage()
         },
         {
+          title: '分享为图片',
+          action: () => this.onShareCard(this.message.id)
+        },
+        {
           title: '从此处分支（保留原会话）',
           action: () => this.onFork(this.message.id)
         },
@@ -1975,6 +1983,8 @@ export struct MessageItem {
       }
     }
     .width('100%')
+    // Stable id so componentSnapshot can capture exactly this bubble.
+    .id(`msg-${this.message.id}`)
     .alignItems(this.bubbleAlign())
     .margin({ bottom: 12 })
     .transition(TransitionEffect.asymmetric(
@@ -2258,7 +2268,10 @@ export struct ChatView {
   onCountChange(): void {
     this.refreshArtifacts()
     if (this.messages.length > 0) {
-      this.scroller.scrollToIndex(this.messages.length - 1, true)
+      // ScrollAlign.END, not the default: the default aligns the item to the
+      // top of the viewport, which left a short conversation pinned to the top
+      // with a screenful of blank space below it.
+      this.scroller.scrollToIndex(this.messages.length - 1, true, ScrollAlign.END)
     }
   }
 
@@ -2331,6 +2344,20 @@ export struct ChatView {
       .width('100%')
       .height('100%')
     }
+  }
+
+  /** Render one bubble to PNG and hand it to the system share panel. */
+  private async shareCard(messageId: string): Promise<void> {
+    const context = getContext(this) as common.UIAbilityContext
+    let text = ''
+    for (const item of this.messages) {
+      if (item.id === messageId) {
+        text = item.text
+        break
+      }
+    }
+    const message = await shareMessageCard(context, `msg-${messageId}`, this.title, text)
+    this.getUIContext().getPromptAction().showToast({ message: message, duration: 2400 })
   }
 
   /** Text after the leading `/`, or '' when the draft is not a command. */
@@ -2921,7 +2948,10 @@ export struct ChatView {
                   onQuote: (quote: string) => {
                     this.draft = this.draft.length > 0 ? `${quote}\n\n${this.draft}` : `${quote}\n\n`
                   },
-                  onRegenerate: this.onRegenerate
+                  onRegenerate: this.onRegenerate,
+                  onShareCard: (messageId: string) => {
+                    void this.shareCard(messageId)
+                  }
                 })
               }
             }, (item: ChatMessage) => item.id)
