@@ -192,7 +192,9 @@ ACP 实测契约（勿凭直觉改）：
   `AppStorage['accent']`，9 个组件 `@StorageLink('accent')` 绑定，只换强调色、背景保持中性。
   **语音输入暂不可做**：本机 DevEco SDK（API 26）不含 HMS `@kit.CoreSpeechKit`
   （`ets/kits` 与 `api/@hms.ai.speechRecognizer.d.ts` 均不存在），要做得先引入 HMS Core SDK。
-  本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 38 文件 + LocalUnit 构建通过）。
+  本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 40 文件 + LocalUnit 通过；
+  `entry/src/test/LocalUnit.test.ets` 覆盖 `SecretMask` / `Typography` / `TodoModel` / `GoalModel`
+  四个纯函数模块，共 18 个用例）。
   **真机验收（2026-11-12，手机，ACP profile，`scripts/deploy.sh` 调试签名）**：冷启与安装正常；
   通过的有——`/` 命令面板（9 条）、`@` 文件选择与插入（相对路径）、`/导出对话`（真实写出
   `workspace/exports/<标题>-<时间>.md`，模型随后能读到）、待办条（3/3 全绿）、目标条

@@ -125,6 +125,12 @@
 
 ### 变更
 
+- **本地单测覆盖纯函数模块**：`SecretMask`（遮挡/计数/不误伤 `sk-short` 这类词）、`Typography`
+  （档位映射、半磅取整）、`TodoModel`（整表解析、未知状态丢弃、摘要与当前步）、`GoalModel`
+  （create / pause / complete / edit、`get_goal` 不改状态）。这些模块的 bug 都是静默的——
+  遮错一段、清单解析成空、目标忘了已暂停——所以放进装机前必跑的 LocalUnit。
+  **写测试时抓到自己算错**：`scaled(12, 0.9)` 我先写了 10.5，实际 12×0.9=10.8 取半磅是 11。
+
 - **包名** `com.example.dshharmony` → `com.qtepp.taharness`（`com.example` 是保留域名，
   AGC 不收）。`vendor` 改为 `qtepp`。
 - **发布构建脚本** `scripts/build-release.sh`：校验 profile 与 bundleName 一致 → 注入发布签名 →
