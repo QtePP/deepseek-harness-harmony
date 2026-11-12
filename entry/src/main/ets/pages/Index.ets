@@ -1952,6 +1952,16 @@ struct Index {
     this.refreshGoal()
   }
 
+  /** Pin or unpin a conversation; the rail re-sorts immediately. */
+  private async pinSession(id: string, pinned: boolean): Promise<void> {
+    await this.store.setPinned(id, pinned)
+    await this.refreshSessionIndex()
+    this.getUIContext().getPromptAction().showToast({
+      message: pinned ? '已置顶' : '已取消置顶',
+      duration: 1600
+    })
+  }
+
   /**
    * Rename one conversation locally: index row, cached message blob and —
    * when it is the open one — the live header. The durable server log keeps
@@ -2360,6 +2370,9 @@ struct Index {
       },
       onUnbindProjectDir: (id: string) => {
         void this.unbindProjectDir(id)
+      },
+      onPinSession: (id: string, pinned: boolean) => {
+        void this.pinSession(id, pinned)
       }
     })
   }
@@ -2439,6 +2452,9 @@ struct Index {
                 },
                 onUnbindProjectDir: (id: string) => {
                   void this.unbindProjectDir(id)
+                },
+                onPinSession: (id: string, pinned: boolean) => {
+                  void this.pinSession(id, pinned)
                 }
               })
                 .width(260)

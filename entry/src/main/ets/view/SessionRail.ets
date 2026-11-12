@@ -40,6 +40,7 @@ export struct SessionRail {
   onDeleteProject: (id: string) => void = () => {}
   onBindProjectDir: (id: string) => void = () => {}
   onUnbindProjectDir: (id: string) => void = () => {}
+  onPinSession: (id: string, pinned: boolean) => void = () => {}
   private renamingId: string = ''
   /** Session row under the finger; drives the pressed scale feedback. */
   @State pressedSessionId: string = ''
@@ -183,6 +184,23 @@ export struct SessionRail {
   @Builder
   sessionMenuPopup(row: SessionSummary) {
     Column({ space: 10 }) {
+      // Pin lives above the destructive copy: it is the one harmless action in
+      // this menu, and it should be the first thing the eye lands on.
+      Row({ space: 8 }) {
+        Text(row.pinned === true ? '取消置顶' : '置顶')
+          .fontSize(13)
+          .fontColor(this.accent)
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .padding({ top: 2, bottom: 2 })
+      .onClick(() => {
+        this.menuSessionId = ''
+        this.onPinSession(row.id, row.pinned !== true)
+      })
+
+      Divider().color($r('app.color.divider'))
+
       Text(`删除会话「${row.title}」？`)
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
@@ -446,11 +464,27 @@ export struct SessionRail {
                       this.accent : Color.Transparent)
 
                   Column({ space: 2 }) {
-                    Text(row.title)
-                      .fontSize(14)
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      .fontColor($r('app.color.text_primary'))
+                    Row({ space: 4 }) {
+                      // A text chip, not a symbol: `sys.symbol.pin` resolves at
+                      // build time but draws nothing on this device, which
+                      // would leave a pinned row looking identical to the rest.
+                      if (row.pinned === true) {
+                        Text('置顶')
+                          .fontSize(10)
+                          .fontColor(this.accent)
+                          .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                          .borderRadius(4)
+                          .backgroundColor($r('app.color.surface_muted'))
+                      }
+                      Text(row.title)
+                        .fontSize(14)
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .fontColor($r('app.color.text_primary'))
+                        .layoutWeight(1)
+                    }
+                    .width('100%')
+                    .alignItems(VerticalAlign.Center)
                     Text(this.label(row.updatedAt))
                       .fontSize(11)
                       .fontColor($r('app.color.text_tertiary'))

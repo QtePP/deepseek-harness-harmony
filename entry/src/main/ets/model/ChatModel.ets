@@ -91,6 +91,8 @@ export interface SessionSummary {
    * produce.
    */
   unread?: boolean
+  /** Pinned rows sort above the rest; the flag is the user's, not recency's. */
+  pinned?: boolean
 }
 
 /**
@@ -103,6 +105,7 @@ interface StoredIndexRow {
   updatedAt: number
   projectId?: string
   unread?: boolean
+  pinned?: boolean
 }
 
 /** One persisted trace entry of a turn's tool call list. */
@@ -183,11 +186,22 @@ export class SessionStore {
         title: row.title,
         updatedAt: row.updatedAt,
         projectId: owner,
-        unread: row.unread === true
+        unread: row.unread === true,
+        pinned: row.pinned === true
       }
       out.push(summary)
     }
-    out.sort((a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt)
+    // Pinned first, then most recent. A pinned conversation that gets a new
+    // answer must not fall below an older one — the pin is the user saying
+    // "this one matters more than the clock".
+    out.sort((a: SessionSummary, b: SessionSummary) => {
+      const pinA = a.pinned === true ? 1 : 0
+      const pinB = b.pinned === true ? 1 : 0
+      if (pinA !== pinB) {
+        return pinB - pinA
+      }
+      return b.updatedAt - a.updatedAt
+    })
     return out
   }
 
@@ -350,6 +364,26 @@ export class SessionStore {
     for (const row of rows) {
       if (row.id === sessionId && row.unread !== unread) {
         row.unread = unread
+        changed = true
+      }
+    }
+    if (!changed) {
+      return
+    }
+    await this.store.put(SessionStore.INDEX_KEY, JSON.stringify(rows))
+    await this.store.flush()
+  }
+
+  /** Pin or unpin one session; the rail re-sorts on the next list(). */
+  async setPinned(sessionId: string, pinned: boolean): Promise<void> {
+    if (this.store === null) {
+      return
+    }
+    const rows = await this.list()
+    let changed = false
+    for (const row of rows) {
+      if (row.id === sessionId && row.pinned !== pinned) {
+        row.pinned = pinned
         changed = true
       }
     }
