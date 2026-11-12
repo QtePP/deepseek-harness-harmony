@@ -11,6 +11,7 @@ import { goalSettled, goalStatusLabel } from '../model/GoalModel'
 import { hasSecret, maskSecrets, secretCount } from '../common/SecretMask'
 import { matchWorkspaceFiles } from '../common/WorkspaceFiles'
 import { shareMessageCard } from '../common/ShareCard'
+import { scaled } from '../common/Typography'
 import { common } from '@kit.AbilityKit'
 import { MdText, copyTextToClipboard } from './Markdown'
 
@@ -894,6 +895,8 @@ export struct MessageItem {
   @State toolExpanded: boolean = false
   /** Credentials are masked until the user asks to see them. */
   @State revealed: boolean = false
+  /** Transcript text size; chrome (chips, captions) keeps its own size. */
+  @StorageLink('fontScale') fontScale: number = 1
   /** Thinking renders collapsed by default; it is long and secondary. */
   @State reasoningExpanded: boolean = false
   /** Thought segments the user opened inside the 轨迹 drawer (by part index). */
@@ -1537,15 +1540,15 @@ export struct MessageItem {
 
         if (this.expandedThoughts.has(index)) {
           Text(text)
-            .fontSize(13)
-            .lineHeight(20)
+            .fontSize(scaled(13, this.fontScale))
+            .lineHeight(scaled(20, this.fontScale))
             .fontColor($r('app.color.text_secondary'))
             .wordBreak(WordBreak.BREAK_ALL)
             .width('100%')
         } else {
           Text(this.previewOf(text))
-            .fontSize(12)
-            .lineHeight(17)
+            .fontSize(scaled(12, this.fontScale))
+            .lineHeight(scaled(17, this.fontScale))
             .fontColor($r('app.color.text_secondary'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -1576,7 +1579,7 @@ export struct MessageItem {
           .rotate({ angle: this.toolExpanded ? 0 : -90 })
           .animation({ curve: curves.springMotion(0.35, 0.85) })
         Text(this.toolLabel())
-          .fontSize(12)
+          .fontSize(scaled(12, this.fontScale))
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
         if (this.toolStatusLabel().length > 0) {
@@ -1602,9 +1605,9 @@ export struct MessageItem {
         if (this.message.toolInput.length > 0) {
           Scroll() {
             Text(this.message.toolInput)
-              .fontSize(12)
+              .fontSize(scaled(12, this.fontScale))
               .fontFamily('monospace')
-              .lineHeight(18)
+              .lineHeight(scaled(18, this.fontScale))
               .fontColor($r('app.color.text_primary'))
               .wordBreak(WordBreak.BREAK_ALL)
               .width('100%')
@@ -1619,9 +1622,9 @@ export struct MessageItem {
         if (this.message.toolOutput.length > 0) {
           Scroll() {
             Text(this.message.toolOutput)
-              .fontSize(12)
+              .fontSize(scaled(12, this.fontScale))
               .fontFamily('monospace')
-              .lineHeight(18)
+              .lineHeight(scaled(18, this.fontScale))
               .fontColor($r('app.color.text_secondary'))
               .wordBreak(WordBreak.BREAK_ALL)
               .width('100%')
@@ -1916,7 +1919,7 @@ export struct MessageItem {
               ForEach(segmentsOf(this.displayText()), (segment: Segment) => {
                 if (segment.code) {
                   Text(segment.text)
-                    .fontSize(13)
+                    .fontSize(scaled(13, this.fontScale))
                     .fontFamily('monospace')
                     .fontColor($r('app.color.text_primary'))
                     .wordBreak(WordBreak.BREAK_ALL)
@@ -1925,8 +1928,8 @@ export struct MessageItem {
                     .borderRadius(8)
                 } else {
                   Text(segment.text)
-                    .fontSize(15)
-                    .lineHeight(22)
+                    .fontSize(scaled(15, this.fontScale))
+                    .lineHeight(scaled(22, this.fontScale))
                     .fontColor($r('app.color.text_primary'))
                     .wordBreak(WordBreak.BREAK_ALL)
                 }

@@ -2,6 +2,7 @@ import { pasteboard, BusinessError } from '@kit.BasicServicesKit'
 import { fileIo as fs } from '@kit.CoreFileKit'
 import { common } from '@kit.AbilityKit'
 import { webview } from '@kit.ArkWeb'
+import { scaled } from '../common/Typography'
 
 /** Block kinds produced by the Markdown block parser. */
 export enum MdKind {
@@ -562,6 +563,9 @@ struct InlineText {
   /** Accent bound to AppStorage; every theme switch repaints without a restart. */
   @StorageLink('accent') accent: string = '#4D6BFE'
 
+  /** Transcript text size; scaled here so every Markdown run follows one switch. */
+  @StorageLink('fontScale') fontScale: number = 1
+
   @Prop content: string = ''
   @Prop baseSize: number = 15
   @Prop lineH: number = 22
@@ -581,8 +585,8 @@ struct InlineText {
           .fontFamily(span.code ? 'monospace' : 'HarmonyOS Sans')
       }, (span: MdSpan, index: number) => `${index}.${span.text.length}.${span.bold}.${span.code}.${span.link.length}`)
     }
-    .fontSize(this.baseSize)
-    .lineHeight(this.lineH)
+    .fontSize(scaled(this.baseSize, this.fontScale))
+    .lineHeight(scaled(this.lineH, this.fontScale))
     .wordBreak(WordBreak.BREAK_ALL)
   }
 }
@@ -590,6 +594,8 @@ struct InlineText {
 /** A fenced code block body with per-language keyword coloring. */
 @Component
 struct CodeText {
+  @StorageLink('fontScale') fontScale: number = 1
+
   @Prop code: string = ''
   @Prop lang: string = ''
 
@@ -600,8 +606,8 @@ struct CodeText {
           .fontColor(codeTokenColor(token.kind))
       }, (token: CodeToken, index: number) => `${index}.${token.kind}.${token.text.length}`)
     }
-    .fontSize(13)
-    .lineHeight(19)
+    .fontSize(scaled(13, this.fontScale))
+    .lineHeight(scaled(19, this.fontScale))
     .fontFamily('monospace')
     .wordBreak(WordBreak.BREAK_ALL)
   }

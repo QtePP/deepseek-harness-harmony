@@ -211,6 +211,12 @@ ACP 实测契约（勿凭直觉改）：
   **分享卡已真机验成**：长按回复 ›「分享为图片」→ 系统分享面板显示「分享 1 项 · 16.82 KB」；
   记录一条契约：`SharedRecord.uri` 必须用 `fileUri.getUriFromPath()`，手拼 `file:///data/...`
   会被 `show()` 以 `IPC data is oversized` 拒绝。
+  **对话字号四档已真机验成**：设置 › 对话字号切「特大」后气泡文字高度 52px → 68px（1.3×），
+  Markdown 正文与代码块同步放大，按钮/说明文字不变。
+  **重启丢回复已修（真机发现，严重）**：`session/prompt` 响应与 `session/update` 流分帧到达，
+  回合结束的 `persist()` 早于回复行创建 ⇒ 落盘只有提问。改为 `settlePersist()`（先
+  `drainAcpUpdates()` 再存）+ `drainAcpUpdates()` 在 `!turnInFlight` 时补存。日志取证：
+  修前 `n=8 u=8 a=0`，修后 `n=12 u=11 a=1`，重启后回复仍在。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。

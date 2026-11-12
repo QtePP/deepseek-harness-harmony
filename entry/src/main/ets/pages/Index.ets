@@ -475,8 +475,16 @@ struct Index {
     if (this.messages.length === 0) {
       return
     }
-    await this.store.save(this.currentId, this.currentProjectId, this.title, this.messages)
-    this.sessions = await this.store.list(this.currentProjectId)
+    // Fire-and-forget callers mean a rejected save is otherwise invisible —
+    // and a silent persistence failure looks exactly like "the reply vanished
+    // after a restart". Log it so the failure is diagnosable from the device.
+    try {
+      await this.store.save(this.currentId, this.currentProjectId, this.title, this.messages)
+      this.sessions = await this.store.list(this.currentProjectId)
+    } catch (error) {
+      hilog.error(0x0000, 'Persist', 'save failed for %{public}s: %{public}s',
+        this.currentId, `${(error as Error).message}`)
+    }
   }
 
   // ---------------------------------------------------------------- rollback
@@ -1175,7 +1183,7 @@ struct Index {
       } else if (stop !== 'end_turn' && stop.length > 0) {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `回合结束：${stop}`, '结束'))
       }
-      void this.persist()
+      this.settlePersist()
       if (stop !== 'cancelled') {
         // A cancelled turn was the user's own decision; only an answer they
         // were not watching deserves a tap on the shoulder.
@@ -1202,6 +1210,10 @@ struct Index {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `发送失败：${message}`, '错误'))
         void Notify.turnFailed(message)
       }
+      // The error row is part of the transcript too; without this a failure
+      // vanished on the next launch, leaving a question with no answer and no
+      // explanation of why.
+      this.settlePersist()
     }
   }
 
@@ -1417,6 +1429,27 @@ struct Index {
     this.updateQueue = []
     for (const payload of batch) {
       this.handleAcpUpdate(payload)
+    }
+    // Chunks that land after the turn settled still belong to the transcript;
+    // without this they rendered and then disappeared on the next launch.
+    if (!this.turnInFlight) {
+      void this.persist()
+    }
+  }
+
+  /**
+   * Persist the transcript after a turn, once every queued update has landed.
+   *
+   * Persisting straight from the settle path wrote the transcript *before* the
+   * reply row existed — the prompt response and the update stream are separate
+   * frames, and the reply arrives in the latter. Draining first makes the save
+   * see what the user sees; a batch that drains later persists itself.
+   */
+  private settlePersist(): void {
+    const hadQueued = this.updateQueue.length > 0
+    this.drainAcpUpdates()
+    if (!hadQueued) {
+      void this.persist()
     }
   }
 
@@ -1724,6 +1757,14 @@ struct Index {
   }
 
   /** Profile and approval tier are boot-time env; persisted for next launch. */
+  /** Persist the transcript text size; it applies to the open views at once. */
+  private async saveFontLevelChoice(id: string): Promise<void> {
+    if (this.context === null) {
+      return
+    }
+    await AppConfig.saveFontLevel(this.context, id)
+  }
+
   /** Persist the appearance; the switch itself happens at the next launch. */
   private async saveAppearanceChoice(mode: string): Promise<void> {
     if (this.context === null) {
@@ -2216,6 +2257,7 @@ struct Index {
       initialPermission: AppConfig.permissionMode,
       initialAccent: AppConfig.accentId,
       initialAppearance: AppConfig.appearance,
+      initialFontLevel: AppConfig.fontLevelId,
       diagnostics: this.diagnostics,
       pluginRows: this.pluginRows,
       onSave: (key: string, model: string) => {
@@ -2232,6 +2274,9 @@ struct Index {
       },
       onAppearanceChange: (mode: string) => {
         void this.saveAppearanceChoice(mode)
+      },
+      onFontLevelChange: (id: string) => {
+        void this.saveFontLevelChoice(id)
       },
       onRefreshDiagnostics: () => this.refreshDiagnostics(),
       onResetPayload: () => {

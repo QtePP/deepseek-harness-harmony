@@ -1,6 +1,7 @@
 import { PluginRow } from '../model/PluginCatalog'
 import { AppConfig } from '../common/AppConfig'
 import { THEMES, ThemeOption } from '../common/Theme'
+import { FONT_LEVELS, FontLevel } from '../common/Typography'
 
 /** Settings sheet: credentials, model route, capability toggles, diagnostics. */
 @Component
@@ -14,6 +15,7 @@ export struct SettingsSheet {
   @State permissionMode: string = 'workspace-write'
   @State accentId: string = 'blue'
   @State appearance: string = 'system'
+  @State fontLevel: string = 'standard'
   @State showDiagnostics: boolean = false
   @State showLocked: boolean = false
   @Prop initialKey: string = ''
@@ -22,6 +24,7 @@ export struct SettingsSheet {
   @Prop initialPermission: string = 'workspace-write'
   @Prop initialAccent: string = 'blue'
   @Prop initialAppearance: string = 'system'
+  @Prop initialFontLevel: string = 'standard'
   @Prop diagnostics: string = ''
   @Prop pluginRows: PluginRow[] = []
   onSave: (key: string, model: string) => void = () => {}
@@ -35,6 +38,8 @@ export struct SettingsSheet {
   onEnableNotifications: () => void = () => {}
   /** 'system' | 'light' | 'dark'; the shell persists and applies it. */
   onAppearanceChange: (mode: string) => void = () => {}
+  /** Transcript text size id; applied live. */
+  onFontLevelChange: (id: string) => void = () => {}
 
   aboutToAppear(): void {
     this.apiKey = this.initialKey
@@ -43,6 +48,7 @@ export struct SettingsSheet {
     this.permissionMode = AppConfig.normalizePermissionMode(this.initialPermission)
     this.accentId = this.initialAccent
     this.appearance = this.initialAppearance
+    this.fontLevel = this.initialFontLevel
   }
 
   private permissionHint(mode: string): string {
@@ -166,6 +172,30 @@ export struct SettingsSheet {
           }
           .width('100%')
           Text('切换后需重启应用生效（运行中改配色会重建窗口）')
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+
+        Column({ space: 6 }) {
+          Text('对话字号').fontSize(12).fontColor($r('app.color.text_secondary'))
+          Row({ space: 8 }) {
+            ForEach(FONT_LEVELS, (level: FontLevel) => {
+              Button(level.label)
+                .layoutWeight(1)
+                .fontSize(13)
+                .backgroundColor(this.fontLevel === level.id ? this.accent : $r('app.color.surface_muted'))
+                .fontColor(this.fontLevel === level.id ? Color.White : $r('app.color.text_primary'))
+                .accessibilityText(`对话字号：${level.label}`)
+                .onClick(() => {
+                  this.fontLevel = level.id
+                  this.onFontLevelChange(level.id)
+                })
+            }, (level: FontLevel) => level.id)
+          }
+          .width('100%')
+          Text('只缩放对话内容（正文、思考、工具行），按钮与说明文字保持原尺寸；立即生效。')
             .fontSize(11)
             .fontColor($r('app.color.text_tertiary'))
         }

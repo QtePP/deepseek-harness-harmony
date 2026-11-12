@@ -4,6 +4,7 @@ import { util } from '@kit.ArkTS'
 import { BusinessError } from '@kit.BasicServicesKit'
 import { fileIo as fs } from '@kit.CoreFileKit'
 import { ACCENT_KEY, ACCENT_DEFAULT, accentOf, themeIdOf } from './Theme'
+import { FONT_SCALE_KEY, fontScaleOf, fontIdOf } from './Typography'
 
 interface SecretsFile {
   deepseekApiKey?: string
@@ -44,6 +45,8 @@ export class AppConfig {
   static accentId: string = 'blue'
   /** 'system' | 'light' | 'dark'; applied through the application context. */
   static appearance: string = AppConfig.APPEARANCE_SYSTEM
+  /** Transcript text size id; the multiplier lives in AppStorage for the views. */
+  static fontLevelId: string = 'standard'
   /** dsh profile for the next boot; SDK stays the default, ACP is opt-in. */
   static profile: string = AppConfig.PROFILE_SDK
   /** Approval tier surfaced to bootstrap as DSH_PERMISSION_MODE. */
@@ -58,11 +61,14 @@ export class AppConfig {
     const permission = await AppConfig.store.get('permission_mode', AppConfig.PERMISSION_WORKSPACE) as string
     const accent = await AppConfig.store.get('accent', 'blue') as string
     const appearance = await AppConfig.store.get('appearance', AppConfig.APPEARANCE_SYSTEM) as string
+    const fontLevel = await AppConfig.store.get('font_level', 'standard') as string
     AppConfig.model = model.length === 0 ? AppConfig.MODEL : model
     AppConfig.profile = profile === AppConfig.PROFILE_ACP ? AppConfig.PROFILE_ACP : AppConfig.PROFILE_SDK
     AppConfig.permissionMode = AppConfig.normalizePermissionMode(permission)
     AppConfig.accentId = themeIdOf(accentOf(accent))
     AppStorage.setOrCreate(ACCENT_KEY, accentOf(AppConfig.accentId))
+    AppConfig.fontLevelId = fontIdOf(fontScaleOf(fontLevel))
+    AppStorage.setOrCreate(FONT_SCALE_KEY, fontScaleOf(AppConfig.fontLevelId))
     AppConfig.appearance = AppConfig.normalizeAppearance(appearance)
     AppConfig.apiKey = saved.length > 0 ? saved : AppConfig.readBundledKey(context)
   }
@@ -169,6 +175,17 @@ export class AppConfig {
       AppConfig.store = await preferences.getPreferences(context, AppConfig.STORE)
     }
     await AppConfig.store.put('appearance', AppConfig.appearance)
+    await AppConfig.store.flush()
+  }
+
+  /** Persist the transcript text size and publish it to every bound view. */
+  static async saveFontLevel(context: common.UIAbilityContext, id: string): Promise<void> {
+    AppConfig.fontLevelId = fontIdOf(fontScaleOf(id))
+    AppStorage.setOrCreate(FONT_SCALE_KEY, fontScaleOf(AppConfig.fontLevelId))
+    if (AppConfig.store === null) {
+      AppConfig.store = await preferences.getPreferences(context, AppConfig.STORE)
+    }
+    await AppConfig.store.put('font_level', AppConfig.fontLevelId)
     await AppConfig.store.flush()
   }
 
