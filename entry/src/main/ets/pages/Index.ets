@@ -9,7 +9,7 @@ import { BootPhase, NodeHost } from '../host/NodeHost'
 import { AppConfig } from '../common/AppConfig'
 import { PluginConfig } from '../common/PluginConfig'
 import { PluginCatalog, PluginRow } from '../model/PluginCatalog'
-import { ChatMessage, Role, SessionStore, SessionSummary, ToolTrace, newSessionId, titleOf } from '../model/ChatModel'
+import { ChatMessage, ContentHit, Role, SessionStore, SessionSummary, ToolTrace, newSessionId, titleOf } from '../model/ChatModel'
 import { ProjectStore, ProjectSummary } from '../model/ProjectModel'
 import { renderBlocks, RenderedBlock } from '../model/DshClient'
 import { DirGrant } from '../host/DirGrant'
@@ -154,6 +154,8 @@ struct Index {
   /** Share prefill landing in the composer (absorbed once by ChatView). */
   @State shareText: string = ''
   @State attachPaths: string[] = []
+  /** Transcript matches for the rail's search box. */
+  @State contentHits: ContentHit[] = []
   /** Turns typed during a live run; drained one per settle. */
   @State queued: QueuedTurn[] = []
   /** The model's standing plan, projected from its latest `todo_write`. */
@@ -2001,6 +2003,25 @@ struct Index {
     })
   }
 
+  /**
+   * Scan the cached transcripts for the rail's search box.
+   *
+   * Runs on every keystroke, so the guard matters: a slow scan for "h" must
+   * not overwrite the results for "hello" that arrived later.
+   */
+  private async searchContent(query: string): Promise<void> {
+    const term = query.trim()
+    if (term.length === 0) {
+      this.contentHits = []
+      return
+    }
+    const hits = await this.store.searchContent(term, this.currentProjectId, 5)
+    if (query.trim() !== term) {
+      return
+    }
+    this.contentHits = hits
+  }
+
   /** Archive or restore a batch; one index write per session, then one reload. */
   private async archiveMany(ids: string[], archived: boolean): Promise<void> {
     for (const id of ids) {
@@ -2463,6 +2484,10 @@ struct Index {
       },
       onDeleteMany: (ids: string[]) => {
         void this.deleteMany(ids)
+      },
+      contentHits: this.contentHits,
+      onSearchContent: (query: string) => {
+        void this.searchContent(query)
       }
     })
   }
@@ -2554,6 +2579,10 @@ struct Index {
                 },
                 onDeleteMany: (ids: string[]) => {
                   void this.deleteMany(ids)
+                },
+                contentHits: this.contentHits,
+                onSearchContent: (query: string) => {
+                  void this.searchContent(query)
                 }
               })
                 .width(260)

@@ -77,6 +77,18 @@ export class ChatMessage {
   }
 }
 
+/** One line around a match, so a result reads as a sentence rather than a cut. */
+function snippetAround(text: string, at: number, length: number): string {
+  const before = 24
+  const after = 60
+  const start = Math.max(0, at - before)
+  const end = Math.min(text.length, at + length + after)
+  const flat = text.substring(start, end).replace(/\s+/g, ' ').trim()
+  const lead = start > 0 ? '…' : ''
+  const tail = end < text.length ? '…' : ''
+  return `${lead}${flat}${tail}`
+}
+
 /** Index row for the session rail. */
 export interface SessionSummary {
   id: string
@@ -95,6 +107,16 @@ export interface SessionSummary {
   pinned?: boolean
   /** Archived rows leave the default list; the transcript and files stay. */
   archived?: boolean
+}
+
+/** One conversation whose cached transcript contains the search term. */
+export interface ContentHit {
+  id: string
+  title: string
+  /** Matched line, clipped, with the term still inside it. */
+  snippet: string
+  /** 'user' | 'assistant' — whose message matched. */
+  role: string
 }
 
 /**
@@ -422,6 +444,61 @@ export class SessionStore {
     }
     await this.store.put(SessionStore.INDEX_KEY, JSON.stringify(rows))
     await this.store.flush()
+  }
+
+  /**
+   * Search the cached transcripts of one project.
+   *
+   * Only what the phone already holds is searched — the last 200 messages of
+   * each conversation — so this stays instant and works with the runtime
+   * asleep. The server-side log is not read: it is a zstd archive the client
+   * cannot open, and pretending otherwise would make the result look complete
+   * when it is not.
+   *
+   * One hit per conversation, newest first: a search result list is for
+   * finding the conversation, not for reading every occurrence.
+   */
+  async searchContent(query: string, projectId: string, limit: number): Promise<ContentHit[]> {
+    const needle = query.trim().toLowerCase()
+    const out: ContentHit[] = []
+    if (needle.length === 0 || this.store === null) {
+      return out
+    }
+    const rows = await this.list(projectId)
+    for (const row of rows) {
+      const raw = await this.store.get(`session.${row.id}`, '') as string
+      if (raw.length === 0) {
+        continue
+      }
+      let hit: ContentHit | null = null
+      try {
+        const stored = JSON.parse(raw) as StoredSession
+        for (let index = stored.messages.length - 1; index >= 0; index--) {
+          const message = stored.messages[index]
+          const text = message.text === undefined ? '' : message.text
+          const at = text.toLowerCase().indexOf(needle)
+          if (at < 0) {
+            continue
+          }
+          hit = {
+            id: row.id,
+            title: row.title,
+            snippet: snippetAround(text, at, needle.length),
+            role: message.role
+          }
+          break
+        }
+      } catch (error) {
+        continue
+      }
+      if (hit !== null) {
+        out.push(hit)
+        if (out.length >= limit) {
+          break
+        }
+      }
+    }
+    return out
   }
 
   /** Drop one session: its index row and its cached message blob. */

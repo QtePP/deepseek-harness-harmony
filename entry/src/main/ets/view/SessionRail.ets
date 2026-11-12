@@ -1,4 +1,4 @@
-import { SessionSummary } from '../model/ChatModel'
+import { ContentHit, SessionSummary } from '../model/ChatModel'
 import { ProjectStore, ProjectSummary } from '../model/ProjectModel'
 
 /**
@@ -44,6 +44,9 @@ export struct SessionRail {
   onArchiveSession: (id: string, archived: boolean) => void = () => {}
   onArchiveMany: (ids: string[], archived: boolean) => void = () => {}
   onDeleteMany: (ids: string[]) => void = () => {}
+  /** Transcript matches for the current query; computed by the shell. */
+  @Prop contentHits: ContentHit[] = []
+  onSearchContent: (query: string) => void = () => {}
   private renamingId: string = ''
   /** Session row under the finger; drives the pressed scale feedback. */
   @State pressedSessionId: string = ''
@@ -461,6 +464,8 @@ export struct SessionRail {
               .padding({ left: 0, right: 0 })
               .onChange((value: string) => {
                 this.sessionQuery = value
+                // The shell owns the transcript cache, so it does the scan.
+                this.onSearchContent(value)
               })
               .onFocus(() => {
                 this.searchFocused = true
@@ -482,6 +487,7 @@ export struct SessionRail {
               .justifyContent(FlexAlign.Center)
               .onClick(() => {
                 this.sessionQuery = ''
+                this.onSearchContent('')
               })
             }
           }
@@ -503,11 +509,64 @@ export struct SessionRail {
         .padding({ left: 16, right: 12, bottom: 6 })
       }
 
+      // Transcript matches sit above the title list: when someone types a word
+      // they remember from a conversation, the conversation whose *title* also
+      // matched is usually not the one they meant.
+      if (this.sessionQuery.trim().length > 0 && this.contentHits.length > 0) {
+        Column({ space: 2 }) {
+          Text(`内容匹配 ${this.contentHits.length}`)
+            .fontSize(11)
+            .fontColor($r('app.color.text_tertiary'))
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 2, bottom: 2 })
+
+          ForEach(this.contentHits, (hit: ContentHit) => {
+            Row({ space: 8 }) {
+              Text(hit.role === 'user' ? '问' : '答')
+                .fontSize(10)
+                .fontColor(this.accent)
+                .width(18)
+                .height(18)
+                .textAlign(TextAlign.Center)
+                .borderRadius(4)
+                .backgroundColor($r('app.color.surface_muted'))
+              Column({ space: 2 }) {
+                Text(hit.title)
+                  .fontSize(12)
+                  .fontColor($r('app.color.text_primary'))
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .width('100%')
+                Text(hit.snippet)
+                  .fontSize(11)
+                  .fontColor($r('app.color.text_tertiary'))
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .width('100%')
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+            .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.sessionQuery = ''
+              this.onSearchContent('')
+              this.onSelect(hit.id)
+            })
+          }, (hit: ContentHit) => hit.id)
+        }
+        .width('100%')
+        .padding({ bottom: 4 })
+      }
+
       List() {
         // The empty state lives inside the list so it lands exactly where the
         // rows would be; the List itself stays, otherwise the rail's flex
         // height would collapse when the filter matches nothing.
-        if (this.sessions.length > 0 && this.visibleSessions().length === 0) {
+        if (this.sessions.length > 0 && this.visibleSessions().length === 0 &&
+          this.contentHits.length === 0) {
           ListItem() {
             Text(this.showArchived ? '没有已归档的会话' : '没有匹配的会话')
               .fontSize(13)

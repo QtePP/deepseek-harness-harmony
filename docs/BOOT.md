@@ -16,6 +16,19 @@ EntryAbility → Index.init → NodeHost.boot → NodeRuntime.start(dlopen libno
 `libnode.so` 由 `@fellow99/node-bridge` 用 `dlopen` + `dlsym(node::Start)` 拉进同一个进程。
 这就是「为什么不能 fork/exec」的直接后果：所有适配都只能发生在**进程内部**。
 
+### 0.1 三种语言，一个进程
+
+| 层 | 语言 | 在哪 | 干什么 |
+|---|---|---|---|
+| 界面 | ArkTS（TypeScript 的鸿蒙子集，编译成 `.abc` 字节码） | `entry/src/main/ets/**` | 按钮、气泡、设置页、审批弹窗 |
+| 大脑 | JavaScript（ESM） | 载荷里的 `@deepseek-ai/dsh` | agent loop、工具调用、会话持久化、模型适配 |
+| 引擎 | C / C++（V8 + libuv + llhttp） | `libnode.so`（≈122MB，随 HAP 分发） | 执行上面那层 JS |
+| 胶水 | JavaScript（CommonJS） | `host/*.cjs` | 在 Node 里把 dsh 拉起来、打平台垫片 |
+
+一句话：**界面是 ArkTS，干活的是 JavaScript，跑 JavaScript 的引擎是 C++。** 三者不是三个进程，
+是同一个进程里的三层——ArkTS 和 JS 之间只隔一条 `127.0.0.1:4517` 的 TCP，说的是换行分隔的 JSON-RPC。
+
+
 ## 1. 启动时序（带行号）
 
 | # | 阶段 | 代码 | 干什么 / 为什么 |
@@ -132,6 +145,35 @@ profile 是 `host/profile-ohos/profiles/ohos/package.json`：
 判据很简单：改 `.ets` 只影响 UI（重新 build 即可）；改 `host/` 下任何东西——包括那几个 YAML——
 都必须先重跑 `assemble-payload` 再 build；只有设置页生成的 `user.patch.yml` 是运行期写的，不用重装。
 `scripts/*.sh` 与运行时无关，它们只是把「装 / 签 / 跑 / 验」串起来。
+
+### 5.1 为什么同时有 `.cjs` 和 `.mjs`
+
+扩展名是**这个文件属于哪套模块系统**的硬声明，优先级高于 `package.json` 的 `type`：
+
+| 扩展名 | 模块系统 | 谁决定 |
+|---|---|---|
+| `.cjs` | 永远 CommonJS | 扩展名 |
+| `.mjs` | 永远 ESM | 扩展名 |
+| `.js` | 看最近的 `package.json` 的 `type` | `"module"` → ESM，缺省/`"commonjs"` → CJS |
+
+本仓三种都在用，而且都不是随手写的：
+
+- **`host/*.cjs`（bootstrap / fetch-shim / sharp-stub / require-builtin-shim）**：要在 dsh 的 ESM
+  import **之前**同步打补丁（`Module._load`、`Module._resolveFilename`、`fsp.link`、`process.stdin`），
+  并且到处用 `__dirname`（ESM 里没有）。ESM 的命名导入是首次 import 时的**快照**，晚一步补丁
+  就落不到 `import { link } from 'node:fs/promises'` 上——这正是 `installLinkFallback` 注释里
+  "Must run before any ESM import" 的实际含义，不是风格问题。
+- **`host/undici-esm.mjs` + `undici-hooks.mjs`**：必须 ESM。`module.register()` 注册的 resolve
+  钩子本身按 ESM 加载，而它要拦的是 `await import('undici')`——那条路绕过
+  `Module._resolveFilename`，CJS 补丁够不着。`undici-esm.mjs` 再用
+  `import shim from './fetch-shim.cjs'` 把 ESM 请求转回**同一个** CJS 单例，避免两份 shim 各自持有
+  dispatcher。
+- **`scripts/*.mjs`**：仓库根**没有** `package.json`（那里的 `.js` 会默认成 CJS），所以用 `.mjs`
+  明说；顺带拿到 top-level await 与 `import.meta.url`（`ROOT` 就是这么算的）。
+- **载荷里的 `.js` 两种都出现**：`payload/package.json` 写 `"type": "commonjs"`，而 dsh 自己的
+  `package.json` 是 `"type": "module"`——所以 `lib/bin.js` 里能直接写 `import`，同一个树里两套并存。
+
+一句话记法：**`.cjs` 是「我要抢在别人加载前动手」，`.mjs` 是「我要参与 import 图」。**
 
 ## 6. 想快速读懂，按这个顺序读 6 个文件
 
