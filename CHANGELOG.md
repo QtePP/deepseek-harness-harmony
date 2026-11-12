@@ -130,6 +130,12 @@
 
 ### 变更
 
+- **自动化任务（schedule）实测判定为不可行**：dsh 自带 `dsh-schedule` + `dsh-tool-schedule`，
+  但插进 ohos profile 后 runtime 报 `pending (waiting for service: sessionController)`——它要的是
+  `dsh-api-session-controller`（32 个 peer 依赖、含整套 HTTP API 网关）提供的服务。这不是写个
+  插件能补的缺口，因此两行已回滚、载荷重打，parity 里该项从「B 级待做」改成「C 级不可行」。
+  **这次是先本地起 runtime 看挂载结果，再决定装不装机**——省掉了一次 225MB 的无效装机。
+
 - **本地单测覆盖纯函数模块**：`SecretMask`（遮挡/计数/不误伤 `sk-short` 这类词）、`Typography`
   （档位映射、半磅取整）、`TodoModel`（整表解析、未知状态丢弃、摘要与当前步）、`GoalModel`
   （create / pause / complete / edit、`get_goal` 不改状态）。这些模块的 bug 都是静默的——

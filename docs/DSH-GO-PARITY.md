@@ -100,7 +100,7 @@
 | 模型渠道（DeepSeek 账号 / ChatGPT·Claude 订阅 / 自定义渠道） | **部分**：API Key + 模型选择器；无账号 OAuth、无自定义渠道表单 | **B**（渠道写入要经 host 配置或插件） | 建议下一轮（自定义渠道） |
 | **子代理谱系**：顶栏「N 个子智能体」、谱系树、点开接着聊 | **部分**（本轮补展示）：`subagent` 调用有独立分类（动词/颜色/图标）并在回合摘要里单独计数；无谱系树、无顶栏胶囊、不能点开续聊 | A（工具行展示）；**B**（谱系/续聊需插件上报 `subagentCatalog`） | **本轮已落地**（工具行 + 计数）；谱系待插件 |
 | **目标条**：编辑 / 暂停 / 恢复 / 清除 | **部分**（本轮补只读条）：`model/GoalModel.ets` 从 `create_goal` / `update_goal` 参数投影 objective + 状态（进行中/已暂停/已完成/受阻），冷启动按轨迹重建；编辑动作仍无入口 | A（只读条，从 tool_call 投影）；**C**（写操作无 ACP 通道） | **本轮已落地**（只读）；编辑不适用 |
-| **自动化任务（schedule）**：列表 / 筛选 / 详情 / 运行记录 / cron 编辑 / 顶栏时钟 | **无**：`schedule` + `tool-schedule` 只在 `dsh-sdk-app` / `dsh-web-app` bundle 里，ohos profile（base + acp-app + ohos bundle）未挂载 | **B**：profile 增两行 + 自写投递 provider；后台触发不可靠 | **建议下一轮**（最小闭环） |
+| **自动化任务（schedule）**：列表 / 筛选 / 详情 / 运行记录 / cron 编辑 / 顶栏时钟 | **无**，且**实测挂不上**：把 `schedule` + `tool-schedule` 两行插进 ohos bundle 后，`dsh` 启动日志给的是 `schedule (@deepseek-ai/dsh-schedule): pending (waiting for service: sessionController)`——它要的是 `@deepseek-ai/dsh-api-session-controller` 提供的服务，而那套控制器有 **32 个 peer 依赖**（含 `dsh-api-gateway` 的整套 HTTP 面），等于把 web app 栈搬进 ACP profile | **C**（不可行）：不是「写个插件」能补的，缺的是宿主服务，不是工具 | **已实测关闭**（2026-11-13，见 §4） |
 | **后台任务（jobs）**：`job/list` / `job/follow` / `job/kill`、实时输出 | **无**：`tool-jobs` 已禁用 | **C**：依赖子进程派生 | **不适用** |
 | **远程主机**：SSH / DSH Remote（WebRTC / Relay） | **无**（进程内运行时，没有远程连接概念） | **C**：远程主机跑的是 `dsh web`（HTTP `/api/*` + WS），是另一套协议；且与「不连电脑」口径直接冲突 | **不适用**（除非先改产品口径） |
 
@@ -399,7 +399,7 @@
    `@` 读本地 workspace 目录插路径。—— 两者都只用客户端已有能力（`FilesPanel` / `DirGrant`），
    不新增协议。
 
-再往下一轮的 B 级项（要写 ohos 插件 + 载荷迭代，单独立项）：子代理谱系与续聊、自动化任务最小闭环、
+再往下一轮的 B 级项（要写 ohos 插件 + 载荷迭代，单独立项）：子代理谱系与续聊、
 会话内容搜索（`session-query-sqlite` 默认 `openAt: never`，且 `node:sqlite` 在 `--jitless` 下的可用性
 未验证）、插件自带设置表单。
 

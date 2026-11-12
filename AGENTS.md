@@ -243,6 +243,12 @@ ACP 实测契约（勿凭直觉改）：
   **会话内容搜索已真机验成**：搜「微内核」→ 标题无匹配、内容匹配 1 条（答 · 图片请求 +
   「…鸿蒙微内核、Linux 内核与 LiteOS…」），点结果进入该会话。**边界写死**：只扫
   `SessionStore` 缓存（每会话 200 条），不读服务端 zstd 日志——UI 上不要暗示「全部历史」。
+  **自动化任务（schedule）已实测关闭为「不可行」**：把 `schedule` + `tool-schedule` 两行插进
+  ohos bundle 后重打载荷、本地起 runtime，日志给的是
+  `schedule (@deepseek-ai/dsh-schedule): pending (waiting for service: sessionController)`——
+  它依赖 `@deepseek-ai/dsh-api-session-controller`（32 个 peer 依赖，含 `dsh-api-gateway` 整套
+  HTTP 面），不是「补个插件」能补的，缺的是宿主服务。两行已回滚、载荷已重打、本地启动回到
+  零警告。**方法论**：先本地 `--profile ohos` 起一次 runtime 看挂载结果，再决定要不要装机。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。
