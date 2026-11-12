@@ -3,6 +3,8 @@ import { hasSecret, maskSecrets, secretCount } from '../main/ets/common/SecretMa
 import { fontIdOf, fontScaleOf, scaled } from '../main/ets/common/Typography';
 import { activeTodo, completedCount, isTodoTool, todosFromJson, todoSummary } from '../main/ets/model/TodoModel';
 import { goalFromJson, goalSettled, goalStatusLabel, isGoalTool } from '../main/ets/model/GoalModel';
+import { NodeKind, kindVerb, statusLabel, toolKindOf } from '../main/ets/common/TimelineNode';
+import { isWriteTool, writePathsOf } from '../main/ets/model/Rollback';
 
 /**
  * Tests for the pure projections and formatters.
@@ -94,6 +96,67 @@ export default function localUnitTest() {
         expect(todoSummary(todos)).assertContain('1/2');
         expect(todoSummary(todos)).assertContain('two');
       }
+    });
+  });
+
+  describe('TimelineNode', () => {
+    it('classifies tools by what they do, not by which plugin ships them', 0, () => {
+      expect(toolKindOf('read')).assertEqual(NodeKind.READ);
+      expect(toolKindOf('glob')).assertEqual(NodeKind.SEARCH);
+      expect(toolKindOf('write')).assertEqual(NodeKind.WRITE);
+      expect(toolKindOf('web_fetch')).assertEqual(NodeKind.NETWORK);
+    });
+
+    it('gives a subagent its own kind instead of "other"', 0, () => {
+      expect(toolKindOf('subagent')).assertEqual(NodeKind.SUBAGENT);
+      expect(toolKindOf('subagent_fork')).assertEqual(NodeKind.SUBAGENT);
+      expect(kindVerb(NodeKind.SUBAGENT)).assertEqual('子代理');
+    });
+
+    it('keeps a todo write out of the "changed your files" colour', 0, () => {
+      // todo_write contains "write"; the kind must still be OTHER.
+      expect(toolKindOf('todo_write')).assertEqual(NodeKind.OTHER);
+    });
+
+    it('labels statuses and leaves unknown ones blank', 0, () => {
+      expect(statusLabel('completed')).assertEqual('完成');
+      expect(statusLabel('failed')).assertEqual('失败');
+      expect(statusLabel('weird')).assertEqual('');
+    });
+  });
+
+  describe('Rollback path detection', () => {
+    it('treats only mutating tools as writes', 0, () => {
+      expect(isWriteTool('write')).assertTrue();
+      expect(isWriteTool('edit')).assertTrue();
+      expect(isWriteTool('read')).assertFalse();
+      expect(isWriteTool('glob')).assertFalse();
+      expect(isWriteTool('todo_write')).assertTrue();
+    });
+
+    it('reads the path out of an XML-ish argument block', 0, () => {
+      // ArkTS has no untyped object literals; the arguments arrive as JSON, so
+      // the test builds them the same way the wire does.
+      const raw = JSON.parse('{"path":"<path>/tmp/a.txt</path><type>file</type>"}') as Record<string, Object>;
+      const paths = writePathsOf('write', raw, '/work');
+      expect(paths.length).assertEqual(1);
+      expect(paths[0]).assertEqual('/tmp/a.txt');
+    });
+
+    it('resolves a relative path against the turn cwd', 0, () => {
+      const raw = JSON.parse('{"file_path":"notes/today.md"}') as Record<string, Object>;
+      const paths = writePathsOf('edit', raw, '/work');
+      expect(paths[0]).assertEqual('/work/notes/today.md');
+    });
+
+    it('refuses a value that is still markup rather than guessing', 0, () => {
+      const raw = JSON.parse('{"path":"<content>oops</content>"}') as Record<string, Object>;
+      expect(writePathsOf('write', raw, '/work').length).assertEqual(0);
+    });
+
+    it('returns nothing for a read tool even when it names a path', 0, () => {
+      const raw = JSON.parse('{"path":"/tmp/a.txt"}') as Record<string, Object>;
+      expect(writePathsOf('read', raw, '/work').length).assertEqual(0);
     });
   });
 

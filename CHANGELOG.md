@@ -130,6 +130,9 @@
   （create / pause / complete / edit、`get_goal` 不改状态）。这些模块的 bug 都是静默的——
   遮错一段、清单解析成空、目标忘了已暂停——所以放进装机前必跑的 LocalUnit。
   **写测试时抓到自己算错**：`scaled(12, 0.9)` 我先写了 10.5，实际 12×0.9=10.8 取半磅是 11。
+- **单测补到轨迹分类与回撤路径**：`TimelineNode`（读/写/查/联网/子代理分类、`todo_write` 不算
+  「改了你的文件」、未知状态标签留空）、`Rollback`（哪些工具算写、从 XML 式参数里取 `<path>`、
+  相对路径按 cwd 解析、**拿不准的标记值宁可不快照**、读工具即便带 path 也不返回）。合计 27 个用例。
 
 - **包名** `com.example.dshharmony` → `com.qtepp.taharness`（`com.example` 是保留域名，
   AGC 不收）。`vendor` 改为 `qtepp`。
