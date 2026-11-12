@@ -56,6 +56,11 @@
 
 ### 修复
 
+- **对话里的图片长按没反应**（真机发现）：消息行自己挂了一个长按手势（操作菜单），子节点 `Image`
+  上的普通 `LongPressGesture` 会被父手势吞掉。改成 `priorityGesture`。
+- **全屏查看器的顶栏落在状态栏里**（真机发现）：`bindContentCover` 在本机是全屏绘制，顶栏
+  （关闭 / 文件名 / 保存图片）被画进状态栏区域，点那里的事件被系统吃掉——保存按钮看得见、点不动。
+  查看器启动时用 `window.getAvoidArea(TYPE_SYSTEM)` 量出状态栏高度并加到顶栏内边距。
 - **切深色后界面全黑**（真机发现）：运行中调 `setColorMode` 会重建窗口，ArkUI 树留在空白状态。
   改为**启动期**应用：`EntryAbility.onCreate` 用同步 `getPreferencesSync` 读 `appearance`，
   在 `loadContent` 之前设定；设置页切换只落盘并提示「重启应用后生效」。

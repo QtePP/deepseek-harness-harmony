@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit'
+import { window } from '@kit.ArkUI'
 import { webview } from '@kit.ArkWeb'
 import { fileIo as fs } from '@kit.CoreFileKit'
 import { MdText } from './Markdown'
@@ -63,11 +64,35 @@ export struct FileViewer {
   @State text: string = ''
   @State truncated: boolean = false
   @State failed: string = ''
+  /**
+   * Top inset for the status bar.
+   *
+   * bindContentCover draws over the whole screen on this device, so without
+   * this the header (close button, title, save button) sits *inside* the
+   * status bar and taps there go to the system — which is exactly how the save
+   * button appeared present but did nothing.
+   */
+  @State topInset: number = 0
   onClose: () => void = () => {}
   private controller: webview.WebviewController = new webview.WebviewController()
 
   aboutToAppear(): void {
     this.open()
+    this.measureInset()
+  }
+
+  private measureInset(): void {
+    try {
+      const context = getContext(this) as common.UIAbilityContext
+      window.getLastWindow(context).then((win: window.Window) => {
+        const area = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM)
+        this.topInset = px2vp(area.topRect.height)
+      }).catch(() => {
+        this.topInset = 0
+      })
+    } catch (error) {
+      this.topInset = 0
+    }
   }
 
   onSourceChange(): void {
@@ -154,7 +179,7 @@ export struct FileViewer {
         }
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+      .padding({ left: 16, right: 16, top: 10 + this.topInset, bottom: 10 })
 
       Divider().color($r('app.color.divider'))
 

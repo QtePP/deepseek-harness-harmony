@@ -1880,7 +1880,10 @@ export struct MessageItem {
                 .objectFit(ImageFit.Cover)
                 .borderRadius(12)
                 .margin(4)
-                .gesture(LongPressGesture().onAction(() => this.promptImage(path)))
+                // priorityGesture, not gesture: the message row owns a
+                // long-press for its action sheet, and a plain child gesture
+                // loses to it — on the phone the image did nothing at all.
+                .priorityGesture(LongPressGesture().onAction(() => this.promptImage(path)))
             }, (path: string) => path)
           }
           .width('100%')
@@ -1890,7 +1893,7 @@ export struct MessageItem {
             .height(150)
             .objectFit(ImageFit.Cover)
             .borderRadius(14)
-            .gesture(LongPressGesture().onAction(() => this.promptImage(this.message.image)))
+            .priorityGesture(LongPressGesture().onAction(() => this.promptImage(this.message.image)))
         }
 
         if (this.message.reasoning.length > 0 || this.message.trace.length > 0) {
