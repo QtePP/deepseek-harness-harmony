@@ -217,6 +217,10 @@ ACP 实测契约（勿凭直觉改）：
   回合结束的 `persist()` 早于回复行创建 ⇒ 落盘只有提问。改为 `settlePersist()`（先
   `drainAcpUpdates()` 再存）+ `drainAcpUpdates()` 在 `!turnInFlight` 时补存。日志取证：
   修前 `n=8 u=8 a=0`，修后 `n=12 u=11 a=1`，重启后回复仍在。
+  **子代理独立成类已真机验成**：`subagent` 调用有专属动词/颜色/图标，回合摘要显示
+  「已完成 · 5 步 · 1 子代理 · 3.3s」，展开轨迹里那一行写着「子代理 | subagent」。
+  **会话未读标记**：代码已落地（`SessionStore.markUnread` + rail 圆点 + `pendingTurnSession`），
+  **未在真机验成**——需要在回合进行中切走会话，而本轮多次尝试都赶在回合结束之后。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。

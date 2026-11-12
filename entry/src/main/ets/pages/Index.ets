@@ -157,6 +157,8 @@ struct Index {
   private store: SessionStore = new SessionStore()
   private projectStore: ProjectStore = new ProjectStore()
   private context: common.UIAbilityContext | null = null
+  /** Session whose turn was left running by a switch; flagged when it lands. */
+  private pendingTurnSession: string = ''
   /** Session ids the runtime already owns in this process (prompted/resumed). */
   private openedSessions: Set<string> = new Set<string>()
   /** Tool trace entries of the live turn, keyed by toolCallId so updates land. */
@@ -1184,6 +1186,7 @@ struct Index {
         this.append(new ChatMessage(newSessionId(), Role.SYSTEM, `回合结束：${stop}`, '结束'))
       }
       this.settlePersist()
+      this.flagSwitchedTurn()
       if (stop !== 'cancelled') {
         // A cancelled turn was the user's own decision; only an answer they
         // were not watching deserves a tap on the shoulder.
@@ -1215,6 +1218,31 @@ struct Index {
       // explanation of why.
       this.settlePersist()
     }
+  }
+
+  /**
+   * Flag a conversation whose answer landed while the user was elsewhere.
+   *
+   * Only the open session receives stream updates, so the one honest case is a
+   * switch mid-turn: the old turn keeps running server-side, its answer is
+   * dropped by the session filter, and the rail should say so. (A turn that
+   * finishes while the app is backgrounded is covered by the notification
+   * instead — the user sees that answer the moment they return.)
+   */
+  private flagSwitchedTurn(): void {
+    const pending = this.pendingTurnSession
+    this.pendingTurnSession = ''
+    if (pending.length === 0 || pending === this.currentId) {
+      return
+    }
+    void this.store.markUnread(pending, true).then(() => {
+      void this.refreshSessionIndex()
+    })
+  }
+
+  /** Re-read the index so an unread flag written above reaches the rail. */
+  private async refreshSessionIndex(): Promise<void> {
+    this.sessions = await this.store.list(this.currentProjectId)
   }
 
   /** Whether an error message describes the bridge socket dropping. */
@@ -1835,6 +1863,11 @@ struct Index {
     if (id === this.currentId) {
       return
     }
+    // Leaving a live turn behind: remember which conversation owns it so its
+    // answer can be flagged once it lands (the stream stops following it).
+    if (this.turnInFlight) {
+      this.pendingTurnSession = this.currentId
+    }
     await this.persist()
     this.currentId = id
     this.messages = await this.store.load(id)
@@ -1850,6 +1883,9 @@ struct Index {
     this.liveAssistant = null
     this.traceRow = null
     this.toolRows.clear()
+    void this.store.markUnread(id, false).then(() => {
+      void this.refreshSessionIndex()
+    })
     // A queue belongs to the conversation it was typed in; carrying it into a
     // different session would send the words to the wrong context. Say so —
     // silently dropping typed text is the one thing a queue must not do.

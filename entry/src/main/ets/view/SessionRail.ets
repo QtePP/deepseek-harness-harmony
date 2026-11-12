@@ -457,6 +457,14 @@ export struct SessionRail {
                   }
                   .alignItems(HorizontalAlign.Start)
                   .layoutWeight(1)
+
+                  // Unread dot: a turn finished while the app was elsewhere and
+                  // this conversation has not been opened since.
+                  if (row.unread === true) {
+                    Circle({ width: 7, height: 7 })
+                      .fill(this.accent)
+                      .accessibilityText('有新回复')
+                  }
                 }
                 .width('100%')
                 .padding({ left: 10, right: 12, top: 10, bottom: 10 })

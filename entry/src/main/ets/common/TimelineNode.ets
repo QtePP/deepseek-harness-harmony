@@ -17,15 +17,22 @@ export enum NodeKind {
   SEARCH = 'search',
   NETWORK = 'network',
   EXEC = 'exec',
+  /** A delegated child agent: its own run, but read here as one step. */
+  SUBAGENT = 'subagent',
   OTHER = 'other'
 }
 
 /** Kind of a tool call, inferred from its name. */
 export function toolKindOf(name: string): NodeKind {
   const n = name.toLowerCase()
-  // Checked first: `todo_write` writes a task list, not a file, and must not
+  // Delegation is its own kind: a child agent is a run, not a file edit, and
+  // reading it as "other" hid the fact that a whole second agent worked here.
+  if (contains(n, 'subagent')) {
+    return NodeKind.SUBAGENT
+  }
+  // Checked next: `todo_write` writes a task list, not a file, and must not
   // inherit the warm "this changed your files" colour.
-  if (contains(n, 'todo') || contains(n, 'skill') || contains(n, 'subagent') || contains(n, 'plan')) {
+  if (contains(n, 'todo') || contains(n, 'skill') || contains(n, 'plan')) {
     return NodeKind.OTHER
   }
   if (contains(n, 'web') || contains(n, 'fetch') || contains(n, 'http') || contains(n, 'curl')) {
@@ -66,6 +73,8 @@ export function kindVerb(kind: NodeKind): string {
       return '联网'
     case NodeKind.EXEC:
       return '执行'
+    case NodeKind.SUBAGENT:
+      return '子代理'
     default:
       return '调用'
   }
@@ -88,6 +97,8 @@ export function kindAccent(kind: NodeKind): string {
       return '#3FA6A0'
     case NodeKind.EXEC:
       return '#6B7280'
+    case NodeKind.SUBAGENT:
+      return '#A45BD8'
     default:
       return '#9CA3AF'
   }
@@ -106,6 +117,8 @@ export function kindTint(kind: NodeKind): string {
       return '#E8F5F4'
     case NodeKind.EXEC:
       return '#F2F3F5'
+    case NodeKind.SUBAGENT:
+      return '#F6EEFC'
     default:
       return '#F5F6F8'
   }
@@ -127,6 +140,8 @@ export function kindGlyph(kind: NodeKind): Resource {
       return $r('sys.symbol.link')
     case NodeKind.EXEC:
       return $r('sys.symbol.code')
+    case NodeKind.SUBAGENT:
+      return $r('sys.symbol.person_2')
     default:
       return $r('sys.symbol.info_circle')
   }

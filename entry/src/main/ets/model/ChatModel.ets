@@ -84,6 +84,13 @@ export interface SessionSummary {
   updatedAt: number
   /** Owning project; rows written before projects existed normalise to default. */
   projectId: string
+  /**
+   * A turn finished while the app was in the background and the session has
+   * not been opened since. Only the open session receives stream updates, so
+   * this is the one "you missed something" signal the client can honestly
+   * produce.
+   */
+  unread?: boolean
 }
 
 /**
@@ -95,6 +102,7 @@ interface StoredIndexRow {
   title: string
   updatedAt: number
   projectId?: string
+  unread?: boolean
 }
 
 /** One persisted trace entry of a turn's tool call list. */
@@ -174,7 +182,8 @@ export class SessionStore {
         id: row.id,
         title: row.title,
         updatedAt: row.updatedAt,
-        projectId: owner
+        projectId: owner,
+        unread: row.unread === true
       }
       out.push(summary)
     }
@@ -323,6 +332,32 @@ export class SessionStore {
       existing.push(fresh)
     }
     return existing
+  }
+
+  /**
+   * Set or clear the unread flag on one session's index row.
+   *
+   * Deliberately separate from `save()`: the flag is about what the *user* has
+   * seen, not about the transcript, so a turn finishing must not clear it and
+   * opening the session must not rewrite the messages.
+   */
+  async markUnread(sessionId: string, unread: boolean): Promise<void> {
+    if (this.store === null) {
+      return
+    }
+    const rows = await this.list()
+    let changed = false
+    for (const row of rows) {
+      if (row.id === sessionId && row.unread !== unread) {
+        row.unread = unread
+        changed = true
+      }
+    }
+    if (!changed) {
+      return
+    }
+    await this.store.put(SessionStore.INDEX_KEY, JSON.stringify(rows))
+    await this.store.flush()
   }
 
   /** Drop one session: its index row and its cached message blob. */

@@ -1690,13 +1690,32 @@ export struct MessageItem {
       }
     }
     const duration = this.runDuration()
+    const agents = this.subagentCount()
+    const agentPart = agents > 0 ? ` · ${agents} 子代理` : ''
     if (failed) {
-      return `有失败 · ${steps} 步${duration}`
+      return `有失败 · ${steps} 步${agentPart}${duration}`
     }
     if (open) {
-      return `已中断 · ${steps} 步${duration}`
+      return `已中断 · ${steps} 步${agentPart}${duration}`
     }
-    return `已完成 · ${steps} 步${duration}`
+    return `已完成 · ${steps} 步${agentPart}${duration}`
+  }
+
+  /**
+   * How many child agents this turn delegated to.
+   *
+   * A subagent is a whole run of its own, so folding it into the step count
+   * would misrepresent both: the user needs to know that work happened in a
+   * separate context, not just that one more tool ran.
+   */
+  private subagentCount(): number {
+    let count = 0
+    for (const entry of this.message.trace) {
+      if (toolKindOf(entry.name) === NodeKind.SUBAGENT) {
+        count++
+      }
+    }
+    return count
   }
 
   private traceLabelColor(): ResourceColor {

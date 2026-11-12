@@ -85,6 +85,11 @@ export class Notify {
     Notify.asked = false
   }
 
+  /** Whether the app is in the foreground; other features gate on this too. */
+  static isForeground(): boolean {
+    return Notify.fg
+  }
+
   private static foreground(): boolean {
     return Notify.fg
   }
