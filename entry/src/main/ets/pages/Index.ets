@@ -50,6 +50,17 @@ const DIGEST_KEYS: string[] = [
   'command', 'code', 'query', 'pattern', 'path', 'file_path', 'filePath', 'url', 'prompt', 'language'
 ]
 
+/** 1234 → 1.2k, 1234567 → 1.2M; small numbers stay exact. */
+function compactTokens(value: number): string {
+  if (value >= 1000000) {
+    return `${(value / 1000000).toFixed(1)}M`
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(1)}k`
+  }
+  return `${value}`
+}
+
 function clipText(text: string, max: number): string {
   return text.length > max ? `${text.substring(0, max)}…` : text
 }
@@ -1576,7 +1587,14 @@ struct Index {
     if (kind === 'usage_update') {
       const used = update.used === undefined ? 0 : update.used
       const size = update.size === undefined ? 0 : update.size
-      const label = `上下文 ${used}/${size}`
+      // A turn's own cost is the jump since the previous report: `used` is the
+      // whole window, which only ever grows, so the delta is what this turn
+      // added. Reported only when it is a plausible increase.
+      const previous = this.previousContextUsed()
+      const delta = previous > 0 && used > previous ? used - previous : 0
+      const label = delta > 0
+        ? `上下文 ${used}/${size} · 本轮 +${compactTokens(delta)}`
+        : `上下文 ${used}/${size}`
       if (this.liveAssistant !== null) {
         this.liveAssistant.note = label
       } else {
@@ -1590,6 +1608,27 @@ struct Index {
         }
       }
     }
+  }
+
+  /** Last reported context occupancy before this turn, or 0 when unknown. */
+  private previousContextUsed(): number {
+    const prefix = '上下文 '
+    for (let index = this.messages.length - 1; index >= 0; index--) {
+      const note = this.messages[index].note
+      if (!note.startsWith(prefix)) {
+        continue
+      }
+      const rest = note.substring(prefix.length)
+      const slash = rest.indexOf('/')
+      if (slash <= 0) {
+        continue
+      }
+      const used = Number(rest.substring(0, slash))
+      if (!Number.isNaN(used) && used > 0) {
+        return used
+      }
+    }
+    return 0
   }
 
   /** Surface a server approval request; unanswered dialogs fail closed. */

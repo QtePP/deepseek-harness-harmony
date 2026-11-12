@@ -41,6 +41,19 @@ const BAR_MAX_WIDTH: number = 420
 /** The timeline grows with its content and scrolls only past this height. */
 const TIMELINE_MAX_HEIGHT: number = 280
 
+/** Digits at the start of a string; 0 when it does not begin with one. */
+function leadingNumber(text: string): number {
+  let end = 0
+  while (end < text.length) {
+    const code = text.charCodeAt(end)
+    if (code < 48 || code > 57) {
+      break
+    }
+    end++
+  }
+  return end === 0 ? 0 : Number(text.substring(0, end))
+}
+
 function isPreviewExt(ext: string): boolean {
   for (const item of PREVIEW_EXTS) {
     if (item === ext) {
@@ -2698,9 +2711,11 @@ export struct ChatView {
       if (slash <= 0) {
         continue
       }
-      const used = Number(rest.substring(0, slash))
-      const size = Number(rest.substring(slash + 1))
-      if (!Number.isNaN(used) && !Number.isNaN(size) && size > 0) {
+      // The note may carry a trailing 「· 本轮 +1.2k」; read the digits only,
+      // otherwise the whole label parses to NaN and the ring silently vanishes.
+      const used = leadingNumber(rest.substring(0, slash))
+      const size = leadingNumber(rest.substring(slash + 1))
+      if (used > 0 && size > 0) {
         return [used, size]
       }
     }
