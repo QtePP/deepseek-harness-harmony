@@ -2001,6 +2001,38 @@ struct Index {
     })
   }
 
+  /** Archive or restore a batch; one index write per session, then one reload. */
+  private async archiveMany(ids: string[], archived: boolean): Promise<void> {
+    for (const id of ids) {
+      await this.store.setArchived(id, archived)
+    }
+    await this.refreshSessionIndex()
+    this.getUIContext().getPromptAction().showToast({
+      message: archived ? `已归档 ${ids.length} 个会话` : `已取消归档 ${ids.length} 个会话`,
+      duration: 2000
+    })
+  }
+
+  /**
+   * Delete a batch. Runs the same per-session cleanup as a single delete —
+   * closing the server session, dropping the index row and the log dir — so a
+   * bulk delete cannot leave half the state behind.
+   */
+  private async deleteMany(ids: string[]): Promise<void> {
+    let removed = 0
+    for (const id of ids) {
+      if (id === this.currentId && this.running) {
+        continue
+      }
+      await this.deleteSession(id)
+      removed++
+    }
+    this.getUIContext().getPromptAction().showToast({
+      message: `已删除 ${removed} 个会话`,
+      duration: 2000
+    })
+  }
+
   /** Pin or unpin a conversation; the rail re-sorts immediately. */
   private async pinSession(id: string, pinned: boolean): Promise<void> {
     await this.store.setPinned(id, pinned)
@@ -2425,6 +2457,12 @@ struct Index {
       },
       onArchiveSession: (id: string, archived: boolean) => {
         void this.archiveSession(id, archived)
+      },
+      onArchiveMany: (ids: string[], archived: boolean) => {
+        void this.archiveMany(ids, archived)
+      },
+      onDeleteMany: (ids: string[]) => {
+        void this.deleteMany(ids)
       }
     })
   }
@@ -2510,6 +2548,12 @@ struct Index {
                 },
                 onArchiveSession: (id: string, archived: boolean) => {
                   void this.archiveSession(id, archived)
+                },
+                onArchiveMany: (ids: string[], archived: boolean) => {
+                  void this.archiveMany(ids, archived)
+                },
+                onDeleteMany: (ids: string[]) => {
+                  void this.deleteMany(ids)
                 }
               })
                 .width(260)

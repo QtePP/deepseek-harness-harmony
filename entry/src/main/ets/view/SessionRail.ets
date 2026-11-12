@@ -42,6 +42,8 @@ export struct SessionRail {
   onUnbindProjectDir: (id: string) => void = () => {}
   onPinSession: (id: string, pinned: boolean) => void = () => {}
   onArchiveSession: (id: string, archived: boolean) => void = () => {}
+  onArchiveMany: (ids: string[], archived: boolean) => void = () => {}
+  onDeleteMany: (ids: string[]) => void = () => {}
   private renamingId: string = ''
   /** Session row under the finger; drives the pressed scale feedback. */
   @State pressedSessionId: string = ''
@@ -50,6 +52,9 @@ export struct SessionRail {
   @State sessionQuery: string = ''
   /** Show the archive instead of the active list; a filter, not a second store. */
   @State showArchived: boolean = false
+  /** Batch mode: taps select instead of opening, and a bar acts on the set. */
+  @State selecting: boolean = false
+  @State selectedIds: Set<string> = new Set<string>()
   /** True while the search field holds focus; drives the 1vp highlight ring. */
   @State searchFocused: boolean = false
 
@@ -103,6 +108,29 @@ export struct SessionRail {
       }
     }
     return count
+  }
+
+  private toggleSelected(id: string): void {
+    if (this.selectedIds.has(id)) {
+      this.selectedIds.delete(id)
+    } else {
+      this.selectedIds.add(id)
+    }
+    // A copy, so @State sees a new value; Set mutation alone does not repaint.
+    this.selectedIds = new Set<string>(this.selectedIds)
+  }
+
+  private selectedList(): string[] {
+    const out: string[] = []
+    for (const id of this.selectedIds) {
+      out.push(id)
+    }
+    return out
+  }
+
+  private exitSelecting(): void {
+    this.selecting = false
+    this.selectedIds = new Set<string>()
   }
 
   private startCreate(): void {
@@ -344,13 +372,24 @@ export struct SessionRail {
       }
 
       Row() {
-        Text(this.showArchived ? '已归档' : '会话')
+        Text(this.selecting ? `已选 ${this.selectedIds.size}` : (this.showArchived ? '已归档' : '会话'))
           .fontSize(13)
           .fontColor($r('app.color.text_secondary'))
 
+        if (this.selecting) {
+          Text('取消')
+            .fontSize(11)
+            .fontColor(this.accent)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius(8)
+            .margin({ left: 8 })
+            .onClick(() => this.exitSelecting())
+        }
+
         // The archive is a view, not a place: one tap swaps the list, and the
         // count says whether it is worth tapping at all.
-        if (this.showArchived || this.archivedCount() > 0) {
+        if (!this.selecting && (this.showArchived || this.archivedCount() > 0)) {
           Text(this.showArchived ? '返回' : `已归档 ${this.archivedCount()}`)
             .fontSize(11)
             .fontColor(this.accent)
@@ -363,9 +402,24 @@ export struct SessionRail {
             })
         }
 
+        if (!this.selecting && this.visibleSessions().length > 1) {
+          Text('选择')
+            .fontSize(11)
+            .fontColor($r('app.color.text_secondary'))
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius(8)
+            .margin({ left: 8 })
+            .onClick(() => {
+              this.selecting = true
+              this.selectedIds = new Set<string>()
+            })
+        }
+
         Blank()
 
-        SymbolGlyph($r('sys.symbol.plus_circle_fill'))
+        if (!this.selecting) {
+          SymbolGlyph($r('sys.symbol.plus_circle_fill'))
           .fontSize(30)
           .fontColor([this.accent])
           .scale({ x: this.newPressed ? 0.88 : 1, y: this.newPressed ? 0.88 : 1 })
@@ -378,6 +432,7 @@ export struct SessionRail {
             }
           })
           .onClick(() => this.onNew())
+        }
       }
       .width('100%')
       .padding({ left: 16, right: 12, top: 12, bottom: 8 })
@@ -500,6 +555,22 @@ export struct SessionRail {
             } else {
               Stack() {
                 Row({ space: 8 }) {
+                  if (this.selecting) {
+                    // Text tick, not a symbol: this one must never fail to draw
+                    // (see the pin glyph note in AGENTS.md).
+                    Text(this.selectedIds.has(row.id) ? '✓' : '')
+                      .fontSize(12)
+                      .width(20)
+                      .height(20)
+                      .textAlign(TextAlign.Center)
+                      .borderRadius(10)
+                      .border({ width: 1, color: this.selectedIds.has(row.id) ?
+                        this.accent : $r('app.color.divider') })
+                      .backgroundColor(this.selectedIds.has(row.id) ?
+                        this.accent : Color.Transparent)
+                      .fontColor(Color.White)
+                  }
+
                   Column()
                     .width(3)
                     .height(30)
@@ -565,8 +636,18 @@ export struct SessionRail {
                     this.pressedSessionId = ''
                   }
                 })
-                .onClick(() => this.onSelect(row.id))
+                .onClick(() => {
+                  if (this.selecting) {
+                    this.toggleSelected(row.id)
+                    return
+                  }
+                  this.onSelect(row.id)
+                })
                 .gesture(LongPressGesture().onAction(() => {
+                  if (this.selecting) {
+                    this.toggleSelected(row.id)
+                    return
+                  }
                   this.menuSessionId = row.id
                 }))
 
@@ -598,6 +679,42 @@ export struct SessionRail {
       .layoutWeight(1)
       .width('100%')
       .padding({ left: 8, right: 8 })
+
+      // Batch bar: only while selecting, and only actionable once something is
+      // picked — an enabled "归档 0" is a button that cannot do anything.
+      if (this.selecting) {
+        Row({ space: 8 }) {
+          Button(`归档 ${this.selectedIds.size}`)
+            .fontSize(13)
+            .height(36)
+            .layoutWeight(1)
+            .backgroundColor(this.selectedIds.size > 0 ?
+              $r('app.color.surface_muted') : $r('app.color.surface'))
+            .fontColor(this.selectedIds.size > 0 ?
+              $r('app.color.text_primary') : $r('app.color.text_tertiary'))
+            .enabled(this.selectedIds.size > 0)
+            .onClick(() => {
+              const ids = this.selectedList()
+              this.exitSelecting()
+              this.onArchiveMany(ids, !this.showArchived)
+            })
+
+          Button(`删除 ${this.selectedIds.size}`)
+            .fontSize(13)
+            .height(36)
+            .layoutWeight(1)
+            .backgroundColor(this.selectedIds.size > 0 ? '#C0392B' : $r('app.color.surface'))
+            .fontColor(this.selectedIds.size > 0 ? Color.White : $r('app.color.text_tertiary'))
+            .enabled(this.selectedIds.size > 0)
+            .onClick(() => {
+              const ids = this.selectedList()
+              this.exitSelecting()
+              this.onDeleteMany(ids)
+            })
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 8, bottom: 12 })
+      }
     }
     .width('100%')
     .height('100%')
