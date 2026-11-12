@@ -93,6 +93,8 @@ export interface SessionSummary {
   unread?: boolean
   /** Pinned rows sort above the rest; the flag is the user's, not recency's. */
   pinned?: boolean
+  /** Archived rows leave the default list; the transcript and files stay. */
+  archived?: boolean
 }
 
 /**
@@ -106,6 +108,7 @@ interface StoredIndexRow {
   projectId?: string
   unread?: boolean
   pinned?: boolean
+  archived?: boolean
 }
 
 /** One persisted trace entry of a turn's tool call list. */
@@ -187,7 +190,8 @@ export class SessionStore {
         updatedAt: row.updatedAt,
         projectId: owner,
         unread: row.unread === true,
-        pinned: row.pinned === true
+        pinned: row.pinned === true,
+        archived: row.archived === true
       }
       out.push(summary)
     }
@@ -384,6 +388,32 @@ export class SessionStore {
     for (const row of rows) {
       if (row.id === sessionId && row.pinned !== pinned) {
         row.pinned = pinned
+        changed = true
+      }
+    }
+    if (!changed) {
+      return
+    }
+    await this.store.put(SessionStore.INDEX_KEY, JSON.stringify(rows))
+    await this.store.flush()
+  }
+
+  /**
+   * Archive or restore one session.
+   *
+   * Archiving is a view filter, not a delete: the transcript, the index row and
+   * the workspace files all stay, so restoring is exact and nothing can be lost
+   * by a mis-tap on a long list.
+   */
+  async setArchived(sessionId: string, archived: boolean): Promise<void> {
+    if (this.store === null) {
+      return
+    }
+    const rows = await this.list()
+    let changed = false
+    for (const row of rows) {
+      if (row.id === sessionId && row.archived !== archived) {
+        row.archived = archived
         changed = true
       }
     }

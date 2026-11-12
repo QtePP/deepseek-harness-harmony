@@ -1952,6 +1952,16 @@ struct Index {
     this.refreshGoal()
   }
 
+  /** Archive or restore a conversation; it only leaves the default list. */
+  private async archiveSession(id: string, archived: boolean): Promise<void> {
+    await this.store.setArchived(id, archived)
+    await this.refreshSessionIndex()
+    this.getUIContext().getPromptAction().showToast({
+      message: archived ? '已归档，可在会话栏的「已归档」里找回' : '已取消归档',
+      duration: 2000
+    })
+  }
+
   /** Pin or unpin a conversation; the rail re-sorts immediately. */
   private async pinSession(id: string, pinned: boolean): Promise<void> {
     await this.store.setPinned(id, pinned)
@@ -2373,6 +2383,9 @@ struct Index {
       },
       onPinSession: (id: string, pinned: boolean) => {
         void this.pinSession(id, pinned)
+      },
+      onArchiveSession: (id: string, archived: boolean) => {
+        void this.archiveSession(id, archived)
       }
     })
   }
@@ -2455,6 +2468,9 @@ struct Index {
                 },
                 onPinSession: (id: string, pinned: boolean) => {
                   void this.pinSession(id, pinned)
+                },
+                onArchiveSession: (id: string, archived: boolean) => {
+                  void this.archiveSession(id, archived)
                 }
               })
                 .width(260)

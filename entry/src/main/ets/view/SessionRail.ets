@@ -41,12 +41,15 @@ export struct SessionRail {
   onBindProjectDir: (id: string) => void = () => {}
   onUnbindProjectDir: (id: string) => void = () => {}
   onPinSession: (id: string, pinned: boolean) => void = () => {}
+  onArchiveSession: (id: string, archived: boolean) => void = () => {}
   private renamingId: string = ''
   /** Session row under the finger; drives the pressed scale feedback. */
   @State pressedSessionId: string = ''
   @State newPressed: boolean = false
   /** Session title filter; empty means "no filter", not "nothing matches". */
   @State sessionQuery: string = ''
+  /** Show the archive instead of the active list; a filter, not a second store. */
+  @State showArchived: boolean = false
   /** True while the search field holds focus; drives the 1vp highlight ring. */
   @State searchFocused: boolean = false
 
@@ -78,17 +81,28 @@ export struct SessionRail {
    */
   private visibleSessions(): SessionSummary[] {
     const query = this.sessionQuery.trim().toLowerCase()
-    if (query.length === 0) {
-      return this.sessions
-    }
     const out: SessionSummary[] = []
     for (let i = 0; i < this.sessions.length; i++) {
       const row: SessionSummary = this.sessions[i]
-      if (row.title.toLowerCase().indexOf(query) >= 0) {
-        out.push(row)
+      if ((row.archived === true) !== this.showArchived) {
+        continue
       }
+      if (query.length > 0 && row.title.toLowerCase().indexOf(query) < 0) {
+        continue
+      }
+      out.push(row)
     }
     return out
+  }
+
+  private archivedCount(): number {
+    let count = 0
+    for (const row of this.sessions) {
+      if (row.archived === true) {
+        count++
+      }
+    }
+    return count
   }
 
   private startCreate(): void {
@@ -197,6 +211,19 @@ export struct SessionRail {
       .onClick(() => {
         this.menuSessionId = ''
         this.onPinSession(row.id, row.pinned !== true)
+      })
+
+      Row({ space: 8 }) {
+        Text(row.archived === true ? '取消归档' : '归档')
+          .fontSize(13)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .padding({ top: 2, bottom: 2 })
+      .onClick(() => {
+        this.menuSessionId = ''
+        this.onArchiveSession(row.id, row.archived !== true)
       })
 
       Divider().color($r('app.color.divider'))
@@ -317,10 +344,27 @@ export struct SessionRail {
       }
 
       Row() {
-        Text('会话')
+        Text(this.showArchived ? '已归档' : '会话')
           .fontSize(13)
           .fontColor($r('app.color.text_secondary'))
-          .layoutWeight(1)
+
+        // The archive is a view, not a place: one tap swaps the list, and the
+        // count says whether it is worth tapping at all.
+        if (this.showArchived || this.archivedCount() > 0) {
+          Text(this.showArchived ? '返回' : `已归档 ${this.archivedCount()}`)
+            .fontSize(11)
+            .fontColor(this.accent)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius(8)
+            .margin({ left: 8 })
+            .onClick(() => {
+              this.showArchived = !this.showArchived
+            })
+        }
+
+        Blank()
+
         SymbolGlyph($r('sys.symbol.plus_circle_fill'))
           .fontSize(30)
           .fontColor([this.accent])
@@ -410,7 +454,7 @@ export struct SessionRail {
         // height would collapse when the filter matches nothing.
         if (this.sessions.length > 0 && this.visibleSessions().length === 0) {
           ListItem() {
-            Text('没有匹配的会话')
+            Text(this.showArchived ? '没有已归档的会话' : '没有匹配的会话')
               .fontSize(13)
               .fontColor($r('app.color.text_tertiary'))
               .width('100%')
