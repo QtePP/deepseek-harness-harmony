@@ -249,6 +249,11 @@ ACP 实测契约（勿凭直觉改）：
   它依赖 `@deepseek-ai/dsh-api-session-controller`（32 个 peer 依赖，含 `dsh-api-gateway` 整套
   HTTP 面），不是「补个插件」能补的，缺的是宿主服务。两行已回滚、载荷已重打、本地启动回到
   零警告。**方法论**：先本地 `--profile ohos` 起一次 runtime 看挂载结果，再决定要不要装机。
+  **消息文件 chip 重复已修（用户真机发现）**：同一文件在消息里被写成
+  `file:///data/…/x.html` 与 `x.html` 时出了三个 chip（chip 只显示 basename，看起来一模一样）。
+  `refsFromText` 原来只按完整路径字符串去重，现在「一条是另一条的 `/` 边界后缀」即折叠；
+  同名不同目录仍分开。**契约**：chip 展示的是 basename，所以去重键必须比展示名更粗——按路径
+  精确去重等于没去重。真机验成：该会话从 3 个 chip 变 1 个。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。

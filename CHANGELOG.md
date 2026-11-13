@@ -89,6 +89,13 @@
 
 ### 修复
 
+- **消息里的文件 chip 重复**（用户发现）：同一条消息把 `file:///data/…/grandpa-fitness-plan.html`
+  写在代码块里、正文里又写成 `grandpa-fitness-plan.html`，`refsFromText()` 只按**完整路径字符串**
+  去重，于是同一文件出三个 chip；而 chip 只显示 basename，三个看起来完全一样。
+  改为「一条路径是另一条的 `/` 边界后缀」即认定同一文件；`a/report.md` 与 `b/report.md`
+  这种不同目录的同名文件仍然分开显示。补 5 个单测（三种写法 → 1、同名异目录 → 2、相对+绝对 → 1、
+  URL 与无扩展名忽略、上限生效）。
+
 - **重启后回答全部消失（只留提问）**（真机发现，严重）：`session/prompt` 的响应与
   `session/update` 的流是两帧，回合结束时的 `persist()` 跑在回复行创建**之前**，于是落盘的是
   「只有提问」的转录；回复随后渲染出来，却再也没有落盘。改为 settle 时先 `drainAcpUpdates()`

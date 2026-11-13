@@ -5,6 +5,7 @@ import { activeTodo, completedCount, isTodoTool, todosFromJson, todoSummary } fr
 import { goalFromJson, goalSettled, goalStatusLabel, isGoalTool } from '../main/ets/model/GoalModel';
 import { NodeKind, kindVerb, statusLabel, toolKindOf } from '../main/ets/common/TimelineNode';
 import { isWriteTool, writePathsOf } from '../main/ets/model/Rollback';
+import { refsFromText } from '../main/ets/view/ChatView';
 
 /**
  * Tests for the pure projections and formatters.
@@ -96,6 +97,35 @@ export default function localUnitTest() {
         expect(todoSummary(todos)).assertContain('1/2');
         expect(todoSummary(todos)).assertContain('two');
       }
+    });
+  });
+
+  describe('refsFromText', () => {
+    it('collapses the same file written three ways into one chip', 0, () => {
+      const text = 'loadUrl("file:///data/storage/el2/base/haps/entry/files/workspace/plan.html")'
+        + '\n\n保存成 plan.html 就行，plan.html 可以直接打开。';
+      const refs = refsFromText(text, 4);
+      expect(refs.length).assertEqual(1);
+      expect(refs[0].name).assertEqual('plan.html');
+    });
+
+    it('keeps two files that share a basename but live in different folders', 0, () => {
+      const refs = refsFromText('对比 a/report.md 和 b/report.md 两份。', 4);
+      expect(refs.length).assertEqual(2);
+    });
+
+    it('keeps a relative path and its absolute form together once', 0, () => {
+      const refs = refsFromText('见 `exports/INDEX.md`，完整路径是 /work/exports/INDEX.md。', 4);
+      expect(refs.length).assertEqual(1);
+    });
+
+    it('ignores urls and bare words without a preview extension', 0, () => {
+      expect(refsFromText('https://example.com/a.html 和 README 都提到了。', 4).length).assertEqual(0);
+    });
+
+    it('respects the limit', 0, () => {
+      const refs = refsFromText('a.md b.md c.md d.md e.md f.md', 3);
+      expect(refs.length).assertEqual(3);
     });
   });
 

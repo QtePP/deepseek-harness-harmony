@@ -234,8 +234,17 @@ export function refsFromText(text: string, limit: number = 4,
     }
     // A listed space form already covers this bare suffix (`plan.MD` after
     // `fitness plan.MD`); likewise a longer form covers a shorter suffix.
+    //
+    // The `/` case is the same idea and matters more in practice: a message
+    // that quotes `file:///data/…/grandpa-fitness-plan.html` in a code block
+    // and then writes `grandpa-fitness-plan.html` in prose is talking about
+    // one file, but the two spellings produced two chips that render
+    // identically — the chip shows only the basename. Collapse them.
     for (const item of out) {
       if (item.path.endsWith(` ${path}`)) {
+        return
+      }
+      if (item.path === path || item.path.endsWith(`/${path}`) || path.endsWith(`/${item.path}`)) {
         return
       }
     }
