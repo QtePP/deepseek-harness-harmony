@@ -24,7 +24,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -127,6 +127,54 @@ function patchNodeModules() {
   ].join('\n'))
 }
 
+/**
+ * Drop packages that can never load on HarmonyOS.
+ *
+ * dsh 0.2.2 pulls in ~312 MB of LibreOffice kits (darwin-arm64 + wasm) and a
+ * darwin sharp/sherpa pair. None of them can run here: the platform executes
+ * only inside the app's signing domain (no native prebuilts), and jitless means
+ * no WebAssembly. They were 225 MB -> 353 MB of the payload for code that is
+ * unreachable, so prune them and let the zip stay near its old size.
+ *
+ * Deliberately conservative, and learned the hard way: `dsh-subprocess-local`
+ * imports `@deepseek-ai/dsh-win32-process` statically even on other platforms,
+ * so pruning it by name broke the boot ("2 required plugins did not activate").
+ * Only packages that are loaded lazily or never may be removed; the boot smoke
+ * is what proves it, so run it after any change to this list.
+ */
+function pruneForeignPlatformPackages() {
+  const modules = join(STAGING, 'node_modules')
+  const doomed = [
+    '@deepseek-ai/libreoffice-kit-darwin-arm64',
+    '@deepseek-ai/libreoffice-kit-wasm',
+    '@deepseek-ai/node-addon-system-darwin-arm64',
+    'sherpa-onnx-darwin-arm64',
+    'sherpa-onnx-win-x64',
+    'sherpa-onnx-linux-x64'
+  ]
+  let freed = 0
+  for (const name of doomed) {
+    const target = join(modules, name)
+    if (!existsSync(target)) {
+      continue
+    }
+    freed += dirSize(target)
+    rmSync(target, { recursive: true, force: true })
+  }
+  if (freed > 0) {
+    process.stdout.write(`pruned ${Math.round(freed / 1048576)} MB of foreign-platform packages\n`)
+  }
+}
+
+function dirSize(dir) {
+  let total = 0
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    total += entry.isDirectory() ? dirSize(full) : statSync(full).size
+  }
+  return total
+}
+
 function verify() {
   const entry = join(STAGING, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
   if (!existsSync(entry)) {
@@ -149,6 +197,7 @@ function pack() {
 prepareStaging()
 stageHost()
 stageProfileTemplate()
+pruneForeignPlatformPackages()
 patchNodeModules()
 const version = verify()
 pack()

@@ -137,6 +137,21 @@
 
 ### 变更
 
+- **载荷升级到 dsh 0.2.2-rc.3**（从 0.2.1-rc.4）。三处真机/本地踩到的坑，都写进了脚本与文档：
+  1. **`tools.mode` 被官方删除**：0.2.2 的 schema 是 `z.never()`（"Mount a native or PTC tool
+     executor instead"）。我们 bundle 里那行 `tools: {mode: native}` 直接让启动失败
+     （`$.mode expected nullable but got native`）。已删掉，改由 base 默认的
+     `tool-executor-native` 承担，`tool-executor-ptc` 保持禁用。
+  2. **载荷从 225MB 涨到 353MB**：0.2.2 带进 LibreOffice 的 darwin-arm64（159MB）+ wasm（153MB）
+     和 darwin 版 sherpa/sharp。这些在鸿蒙上永远跑不起来（原生预编译进不了签名域、jitless 无 WASM）。
+     新增 `pruneForeignPlatformPackages()` 剪掉，**332MB → 载荷回到 240MB**。
+  3. **剪枝差点剪断启动**：`dsh-subprocess-local` 会**静态 import** `@deepseek-ai/dsh-win32-process`，
+     按名字剪掉后启动报「2 required plugins did not activate」。已把该包从剪枝名单移除，
+     并在脚本注释里写死「只剪惰性加载/永不加载的包，改完必须跑启动冒烟」。
+  验证：`--dump-config` 106 行、`tool-fs-search` 仍禁用 + `tool-fs-search-ohos` 仍挂载、
+  启动冒烟**零警告**、插件单测 fs-search 38/38、ptc 22/22（含 `--jitless`）、credentials 8/8、
+  ArkTS 40 文件 + LocalUnit 全绿、HAP 构建通过（352MB）。
+
 - **核对官方 dsh 上游**（`39163dd3` = 0.2.2-rc.3，我们钉 0.2.1-rc.4）：**ACP 协议面未变**
   （9 方法 + `$/cancel_request`、5 种 `session/update`），客户端不需要改。官方 README 明确
   「只暴露标准 ACP v1 面」，并点名 cards/plans/titles/todos/terminal views 不在其中——
