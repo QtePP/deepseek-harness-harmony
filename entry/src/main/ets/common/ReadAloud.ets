@@ -73,7 +73,10 @@ export class ReadAloud {
     try {
       textToSpeech.createEngine(params, (error: BusinessError, engine: textToSpeech.TextToSpeechEngine) => {
         if (error !== null && error !== undefined) {
-          onDone(`朗读引擎启动失败（${error.code}）`)
+          // Same shape as speech input: the syscap is advertised, the engine
+          // still cannot construct (device log: "Create Engine Error!
+          // engineNo 0") because the voice package is a separate download.
+          onDone(`朗读引擎启动失败（${error.code}）：可能缺少系统语音包`)
           return
         }
         this.engine = engine

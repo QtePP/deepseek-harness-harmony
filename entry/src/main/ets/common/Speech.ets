@@ -82,7 +82,11 @@ export class SpeechInput {
     try {
       speechRecognizer.createEngine(params, (error: BusinessError, engine: speechRecognizer.SpeechRecognitionEngine) => {
         if (error !== null && error !== undefined) {
-          callbacks.onError(`语音引擎启动失败（${error.code}）`)
+          // The syscap can be present while the offline Chinese model is not:
+          // the engine then fails to construct (device log: "Failed to create
+          // engine [callback]"). Say what is missing instead of a bare code —
+          // the fix is on the system side, not in this app.
+          callbacks.onError(`语音引擎启动失败（${error.code}）：可能缺少离线中文语音包`)
           return
         }
         this.engine = engine

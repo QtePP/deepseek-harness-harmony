@@ -139,6 +139,34 @@ export class AppConfig {
     AppConfig.applyAppearance(context)
   }
 
+  /**
+   * Whether the offline speech engine has ever failed to start on this device.
+   *
+   * The syscap can be advertised while the offline Chinese model is a separate
+   * download; the engine then fails every time with 1002200001. Remembering the
+   * failure keeps the microphone out of the composer instead of offering a
+   * button that can only produce the same toast on every launch.
+   */
+  static speechAsrUsable(context: common.UIAbilityContext): boolean {
+    try {
+      const store = preferences.getPreferencesSync(context, { name: AppConfig.STORE })
+      return store.getSync('speech_asr_usable', true) as boolean
+    } catch (error) {
+      return true
+    }
+  }
+
+  /** Called once after the engine refuses to construct. */
+  static setSpeechAsrUsable(context: common.UIAbilityContext, usable: boolean): void {
+    try {
+      const store = preferences.getPreferencesSync(context, { name: AppConfig.STORE })
+      store.putSync('speech_asr_usable', usable)
+      store.flush()
+    } catch (error) {
+      // Losing the flag only costs one extra tap next launch.
+    }
+  }
+
   /** Unknown or legacy values fall back to following the system. */
   static normalizeAppearance(mode: string): string {
     if (mode === AppConfig.APPEARANCE_LIGHT || mode === AppConfig.APPEARANCE_DARK) {

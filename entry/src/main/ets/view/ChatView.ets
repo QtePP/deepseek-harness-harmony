@@ -8,6 +8,7 @@ import { NodeKind, kindAccent, kindGlyph, kindTint, kindVerb, statusLabel, toolK
 import { isWriteTool } from '../model/Rollback'
 import { SpeechInput, requestMicPermission, speechSupported } from '../common/Speech'
 import { ReadAloud, speechOutputSupported } from '../common/ReadAloud'
+import { AppConfig } from '../common/AppConfig'
 import { TodoItem, completedCount, todoSummary } from '../model/TodoModel'
 import { goalSettled, goalStatusLabel } from '../model/GoalModel'
 import { hasSecret, maskSecrets, secretCount } from '../common/SecretMask'
@@ -2194,7 +2195,8 @@ export struct ChatView {
     this.syncTypingTimer()
     // Capability, not permission: a device without the speech syscap gets no
     // microphone at all, so the button never appears and then fails.
-    this.speechReady = speechSupported()
+    const speechContext = this.getUIContext().getHostContext() as common.UIAbilityContext
+    this.speechReady = speechSupported() && AppConfig.speechAsrUsable(speechContext)
   }
 
   aboutToDisappear(): void {
@@ -2237,9 +2239,15 @@ export struct ChatView {
       },
       onError: (message: string) => {
         this.dictating = false
-        // A syscap that vanished between launch and tap is worth remembering.
-        this.speechReady = speechSupported()
-        this.getUIContext().getPromptAction().showToast({ message: message, duration: 2500 })
+        // A syscap can be advertised while the engine still cannot start (the
+        // offline model is a separate download). Hiding the button is the
+        // honest reaction: offering it again would just fail again.
+        this.speechReady = false
+        // Remember it: the model is a system download, so it will not appear by
+        // itself between launches.
+        const failedContext = this.getUIContext().getHostContext() as common.UIAbilityContext
+        AppConfig.setSpeechAsrUsable(failedContext, false)
+        this.getUIContext().getPromptAction().showToast({ message: message, duration: 3500 })
       }
     })
   }

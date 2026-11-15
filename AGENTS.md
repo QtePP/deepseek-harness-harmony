@@ -197,7 +197,14 @@ ACP 实测契约（勿凭直觉改）：
   `devecocli check arkts` 直接通过。**因此语音输入与朗读是 A 级（纯客户端可做），不是 C 级**，
   真机还需确认设备带 `SystemCapability.AI.SpeechRecognizer` / `SystemCapability.AI.TextToSpeech`。
   旧结论错在只看 `openharmony/ets/kits`，没看 `hms/ets/kits`。
-  **已实现（未真机验）**：`common/Speech.ets`（离线识别）+ `common/ReadAloud.ets`（朗读）。
+  **已实现并真机验（2026-11-16，手机 6MFGK26527000022）**：`common/Speech.ets` + `common/ReadAloud.ets`。
+  真机结论：**syscap 在、引擎起不来**——麦克风按钮渲染出来了（说明 `canIUse` 为真）、授权弹窗与
+  我们写的理由串正常显示，但 `createEngine` 返回 **1002200001**（设备日志 `AI_COMMON:
+  CreateEngineErrorByCallback Failed to create engine [callback]`）；朗读同样，
+  `AI_TEXT: Create Engine Error! engineNo 0`。两者都指向**离线中文语音包/系统语音包未安装**
+  （模型是单独下载项，不在 App 内）。**降级已验证**：识别失败后按钮立刻隐藏，并把
+  `speech_asr_usable=false` 写进 preferences，重启后不再出现（实测 force-stop 重启后按钮消失）；
+  toast 文案「语音引擎启动失败（1002200001）：可能缺少离线中文语音包」。
   麦克风按钮仅在 `canIUse('SystemCapability.AI.SpeechRecognizer')` 为真时渲染；朗读入口在长按菜单，
   同样先查 `SystemCapability.AI.TextToSpeech`。**API 签名坑**：`startListening` 的 `StartParams`
   必填 `audioInfo{audioType:'pcm',sampleRate:16000,soundChannel:1,sampleBit:16}`；
@@ -265,9 +272,14 @@ ACP 实测契约（勿凭直觉改）：
   `refsFromText` 原来只按完整路径字符串去重，现在「一条是另一条的 `/` 边界后缀」即折叠；
   同名不同目录仍分开。**契约**：chip 展示的是 basename，所以去重键必须比展示名更粗——按路径
   精确去重等于没去重。真机验成：该会话从 3 个 chip 变 1 个。
-  **会话详情（未真机验）**：`/会话详情` → `detailSheet()`，一页汇总上下文 / 轨迹（步数·失败·子代理）/
+  **会话详情已真机验（2026-11-16）**：`/会话详情` 弹出，读到「上下文 39508 / 1048576（4%）」
+  「9 步」「没有待办」「没有目标」「1 个：grandpa-fitness-plan.html」。
+  **会话详情（原记录）**：`/会话详情` → `detailSheet()`，一页汇总上下文 / 轨迹（步数·失败·子代理）/
   待办 / 目标 / **改动文件**（复用 `pathsInToolInput`，与回撤同一批路径）/ 产物数。纯只读，无协议改动。
-  **用量统计（未真机验）**：`model/Usage.ets` 把每轮 `usage_update` 的 delta 累计成日账本
+  **用量统计已真机验（2026-11-16）**：发一轮后设备 preferences `dsh_usage` 里是
+  `<string key="ledger">[{"day":"2026-11-16","tokens":573,"turns":1}]</string>`，与注记
+  「本轮 +573」一致；装后首启显示「还没有记录」（空态正确）。
+  **用量统计（原记录）**：`model/Usage.ets` 把每轮 `usage_update` 的 delta 累计成日账本
   （preferences `dsh_usage`，保留 60 天，跨会话），设置页显示「今天 +X · 近 7 天 +Y」。
   **契约**：delta≤0 时只计轮次、不计 token——上下文注记本来就只在真实增长时报 delta，
   记 0 会造出「有轮次没用量」的空行。7 个单测；真机验收待设备在线。
@@ -286,6 +298,7 @@ ACP 实测契约（勿凭直觉改）：
   list_agents, read, read_image, send_message, skill, subagent, subagent_fork, team_task_create,
   team_task_get, team_task_list, team_task_update, todo_write, update_goal, wait_agent, web_fetch,
   web_search, workflow, working_directory, write`。
+  **真机复验（2026-11-16）**：设备 `bridge.log` 同样是 `tools(25)`，与本地完全一致。
   **这条证据替代了「必须真机确认工具表」的担心**：native executor 生效、`glob`/`grep` 仍是纯 JS 实现、
   没有 `bash`/`job_*`/`run_code`，符合预期。**0.2.2 白送的新工具**：`workflow`（多智能体编排）、
   `team_task_*` 四个（agent-team）、`read_image`、`exit_plan_mode`、`working_directory`、`wait_agent`。
