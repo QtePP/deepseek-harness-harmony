@@ -197,6 +197,12 @@ ACP 实测契约（勿凭直觉改）：
   `devecocli check arkts` 直接通过。**因此语音输入与朗读是 A 级（纯客户端可做），不是 C 级**，
   真机还需确认设备带 `SystemCapability.AI.SpeechRecognizer` / `SystemCapability.AI.TextToSpeech`。
   旧结论错在只看 `openharmony/ets/kits`，没看 `hms/ets/kits`。
+  **已实现（未真机验）**：`common/Speech.ets`（离线识别）+ `common/ReadAloud.ets`（朗读）。
+  麦克风按钮仅在 `canIUse('SystemCapability.AI.SpeechRecognizer')` 为真时渲染；朗读入口在长按菜单，
+  同样先查 `SystemCapability.AI.TextToSpeech`。**API 签名坑**：`startListening` 的 `StartParams`
+  必填 `audioInfo{audioType:'pcm',sampleRate:16000,soundChannel:1,sampleBit:16}`；
+  `finish(sessionId)` 必须传回会话 id；`speak(text,{requestId})` 的回调挂在 `engine.setListener` 上
+  （不是 speak 的第二个参数）。`spokenForm()` 5 个单测。真机验收待设备在线。
   本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 40 文件 + LocalUnit 通过；
   `entry/src/test/LocalUnit.test.ets` 覆盖 `SecretMask` / `Typography` / `TodoModel` / `GoalModel` /
   `TimelineNode` / `Rollback`（纯函数部分）六个模块，共 27 个用例）。

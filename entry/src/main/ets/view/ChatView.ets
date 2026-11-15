@@ -6,6 +6,8 @@ import { ChatMessage, Role, ToolTrace } from '../model/ChatModel'
 import { attachmentNote, stagedImageHint, thumbnailLabel } from '../common/AttachmentCopy'
 import { NodeKind, kindAccent, kindGlyph, kindTint, kindVerb, statusLabel, toolKindOf } from '../common/TimelineNode'
 import { isWriteTool } from '../model/Rollback'
+import { SpeechInput, requestMicPermission, speechSupported } from '../common/Speech'
+import { ReadAloud, speechOutputSupported } from '../common/ReadAloud'
 import { TodoItem, completedCount, todoSummary } from '../model/TodoModel'
 import { goalSettled, goalStatusLabel } from '../model/GoalModel'
 import { hasSecret, maskSecrets, secretCount } from '../common/SecretMask'
@@ -917,6 +919,34 @@ export struct MessageItem {
   @State toolExpanded: boolean = false
   /** Credentials are masked until the user asks to see them. */
   @State revealed: boolean = false
+  /** True while this reply is being read aloud, so the menu can offer "stop". */
+  @State reading: boolean = false
+  private reader: ReadAloud = new ReadAloud()
+
+  /**
+   * Read this reply aloud, or stop if it is already speaking.
+   *
+   * Only offered when the device has the TTS syscap; `reading` lives on the row
+   * so two replies cannot both claim to be playing.
+   */
+  private toggleReading(): void {
+    if (!speechOutputSupported()) {
+      this.getUIContext().getPromptAction().showToast({ message: '本机不支持语音朗读', duration: 2000 })
+      return
+    }
+    if (this.reading) {
+      this.reader.stop()
+      this.reading = false
+      return
+    }
+    this.reading = true
+    this.reader.speak(this.message.text, (error: string) => {
+      this.reading = false
+      if (error.length > 0) {
+        this.getUIContext().getPromptAction().showToast({ message: error, duration: 2500 })
+      }
+    })
+  }
   /** Transcript text size; chrome (chips, captions) keeps its own size. */
   @StorageLink('fontScale') fontScale: number = 1
   /** Thinking renders collapsed by default; it is long and secondary. */
@@ -1862,6 +1892,10 @@ export struct MessageItem {
           action: () => this.quoteMessage()
         },
         {
+          title: this.reading ? '停止朗读' : '朗读这条回复',
+          action: () => this.toggleReading()
+        },
+        {
           title: '分享为图片',
           action: () => this.onShareCard(this.message.id)
         },
@@ -2056,6 +2090,13 @@ export struct ChatView {
   @Prop modelLabel: string = ''
   @Prop canStop: boolean = false
   @State draft: string = ''
+  /** True while the microphone is open; the button doubles as a stop control. */
+  @State dictating: boolean = false
+  /** Set once a device without the speech syscap is detected, to hide the button. */
+  @State speechReady: boolean = false
+  /** Draft as it stood when dictation began; partials replace everything after it. */
+  private dictationBase: string = ''
+  private speech: SpeechInput = new SpeechInput()
   @State titleExpanded: boolean = false
   @State titlePressed: boolean = false
   /** Composer polish: focus ring and pressed send/image feedback. */
@@ -2149,6 +2190,9 @@ export struct ChatView {
   aboutToAppear(): void {
     this.refreshArtifacts()
     this.syncTypingTimer()
+    // Capability, not permission: a device without the speech syscap gets no
+    // microphone at all, so the button never appears and then fails.
+    this.speechReady = speechSupported()
   }
 
   aboutToDisappear(): void {
@@ -2156,6 +2200,46 @@ export struct ChatView {
       clearInterval(this.typingTimer)
       this.typingTimer = -1
     }
+    // The engine holds the microphone; leaving it open across a page swap
+    // would keep the input device busy.
+    this.speech.release()
+  }
+
+  /**
+   * One tap opens the microphone, the next closes it.
+   *
+   * Partials rewrite everything after the draft as it stood on open, so a
+   * second thought mid-sentence corrects the text instead of appending to it.
+   */
+  private async toggleDictation(): Promise<void> {
+    if (this.dictating) {
+      this.dictating = false
+      this.speech.stop()
+      return
+    }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext
+    const granted = await requestMicPermission(context)
+    if (!granted) {
+      this.getUIContext().getPromptAction().showToast({ message: '需要麦克风权限才能语音输入', duration: 2000 })
+      return
+    }
+    this.dictationBase = this.draft
+    this.dictating = true
+    this.speech.start({
+      onPartial: (text: string) => {
+        this.draft = this.dictationBase.length > 0 ? `${this.dictationBase}${text}` : text
+      },
+      onFinal: (text: string) => {
+        this.dictating = false
+        this.draft = this.dictationBase.length > 0 ? `${this.dictationBase}${text}` : text
+      },
+      onError: (message: string) => {
+        this.dictating = false
+        // A syscap that vanished between launch and tap is worth remembering.
+        this.speechReady = speechSupported()
+        this.getUIContext().getPromptAction().showToast({ message: message, duration: 2500 })
+      }
+    })
   }
 
   /** Start the breathing dots only while a turn is running, and stop on idle. */
@@ -3162,6 +3246,24 @@ export struct ChatView {
                   }
                 })
                 .onClick(() => this.onPickModel())
+              }
+
+              // Dictation sits before the image picker: speaking is the faster
+              // way in, and it is the control people reach for most.
+              if (this.speechReady) {
+                Button({ type: ButtonType.Circle }) {
+                  Image($r('app.media.icon_mic'))
+                    .width(16)
+                    .height(16)
+                    .fillColor(this.dictating ? Color.White : $r('app.color.text_secondary'))
+                }
+                .width(34)
+                .height(34)
+                .backgroundColor(this.dictating ? this.accent : $r('app.color.surface'))
+                .accessibilityText(this.dictating ? '停止语音输入' : '语音输入')
+                .onClick(() => {
+                  void this.toggleDictation()
+                })
               }
 
               Button({ type: ButtonType.Circle }) {

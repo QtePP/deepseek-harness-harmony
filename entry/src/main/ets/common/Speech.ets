@@ -1,3 +1,4 @@
+import { abilityAccessCtrl, common } from '@kit.AbilityKit'
 import { speechRecognizer } from '@kit.CoreSpeechKit'
 import { BusinessError } from '@kit.BasicServicesKit'
 
@@ -32,6 +33,22 @@ export interface SpeechCallbacks {
 export function speechSupported(): boolean {
   try {
     return canIUse('SystemCapability.AI.SpeechRecognizer')
+  } catch (error) {
+    return false
+  }
+}
+
+/**
+ * Ask for the microphone, once.
+ *
+ * `requestPermissionsFromUser` shows nothing when the user already answered, so
+ * a denied permission surfaces as `false` rather than as a dialog on every tap.
+ */
+export async function requestMicPermission(context: common.UIAbilityContext): Promise<boolean> {
+  try {
+    const manager = abilityAccessCtrl.createAtManager()
+    const result = await manager.requestPermissionsFromUser(context, ['ohos.permission.MICROPHONE'])
+    return result.authResults.length > 0 && result.authResults[0] === 0
   } catch (error) {
     return false
   }

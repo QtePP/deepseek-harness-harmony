@@ -7,6 +7,7 @@ import { NodeKind, kindVerb, statusLabel, toolKindOf } from '../main/ets/common/
 import { isWriteTool, writePathsOf } from '../main/ets/model/Rollback';
 import { refsFromText } from '../main/ets/view/ChatView';
 import { compactCount, dayKey, mergeUsage, usageTotal, UsageDay } from '../main/ets/model/Usage';
+import { spokenForm } from '../main/ets/common/ReadAloud';
 
 /**
  * Tests for the pure projections and formatters.
@@ -147,6 +148,32 @@ export default function localUnitTest() {
       expect(compactCount(999)).assertEqual('999');
       expect(compactCount(1200)).assertEqual('1.2k');
       expect(compactCount(2500000)).assertEqual('2.5M');
+    });
+  });
+
+  describe('spokenForm', () => {
+    it('drops code blocks instead of reading them out', 0, () => {
+      const spoken = spokenForm('前文\n```js\nconst a = 1\n```\n后文');
+      expect(spoken).assertContain('前文');
+      expect(spoken).assertContain('后文');
+      expect(spoken).assertContain('代码略');
+      expect(spoken.indexOf('const a')).assertEqual(-1);
+    });
+
+    it('keeps inline code text and strips the backticks', 0, () => {
+      expect(spokenForm('用 `SpeechInput` 即可')).assertEqual('用 SpeechInput 即可');
+    });
+
+    it('strips emphasis, headings and list bullets', 0, () => {
+      expect(spokenForm('## 标题\n- **要点**')).assertEqual('标题 要点');
+    });
+
+    it('reduces a link to its text', 0, () => {
+      expect(spokenForm('见 [文档](https://example.com/a)')).assertEqual('见 文档');
+    });
+
+    it('collapses whitespace so the voice does not pause at every newline', 0, () => {
+      expect(spokenForm('a\n\n\nb')).assertEqual('a b');
     });
   });
 

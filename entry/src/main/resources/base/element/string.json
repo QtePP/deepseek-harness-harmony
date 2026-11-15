@@ -13,6 +13,10 @@
       "value": "TA Harness"
     },
     {
+      "name": "mic_perm_reason",
+      "value": "用麦克风把你说的话转成文字，离线识别，录音不上传"
+    },
+    {
       "name": "dir_grant_perm_reason",
       "value": "用于记住你授权的项目目录，重启应用后自动恢复访问"
     }
