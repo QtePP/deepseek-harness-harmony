@@ -10,6 +10,7 @@ import { AppConfig } from '../common/AppConfig'
 import { PluginConfig } from '../common/PluginConfig'
 import { PluginCatalog, PluginRow } from '../model/PluginCatalog'
 import { ChatMessage, ContentHit, Role, SessionStore, SessionSummary, ToolTrace, newSessionId, titleOf } from '../model/ChatModel'
+import { UsageStore } from '../model/Usage'
 import { ProjectStore, ProjectSummary } from '../model/ProjectModel'
 import { renderBlocks, RenderedBlock } from '../model/DshClient'
 import { DirGrant } from '../host/DirGrant'
@@ -154,6 +155,9 @@ struct Index {
   /** Share prefill landing in the composer (absorbed once by ChatView). */
   @State shareText: string = ''
   @State attachPaths: string[] = []
+  /** Token ledger across sessions; the settings sheet shows its summary. */
+  private usage: UsageStore | null = null
+  @State usageSummary: string = ''
   /** Transcript matches for the rail's search box. */
   @State contentHits: ContentHit[] = []
   /** Turns typed during a live run; drained one per settle. */
@@ -226,6 +230,9 @@ struct Index {
     ShareInbox.setListener((text: string, imagePath: string, imageName: string) => {
       this.landShare(text, imagePath, imageName)
     })
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext
+    this.usage = new UsageStore(context)
+    this.usageSummary = this.usage.summary()
     void this.init()
   }
 
@@ -1594,6 +1601,10 @@ struct Index {
       // added. Reported only when it is a plausible increase.
       const previous = this.previousContextUsed()
       const delta = previous > 0 && used > previous ? used - previous : 0
+      if (delta > 0 && this.usage !== null) {
+        this.usage.record(delta)
+        this.usageSummary = this.usage.summary()
+      }
       const label = delta > 0
         ? `上下文 ${used}/${size} · 本轮 +${compactTokens(delta)}`
         : `上下文 ${used}/${size}`
@@ -2399,6 +2410,7 @@ struct Index {
   @Builder
   settingsSheet() {
     SettingsSheet({
+      usageSummary: this.usageSummary,
       initialKey: AppConfig.apiKey,
       initialModel: AppConfig.model,
       initialProfile: AppConfig.profile,

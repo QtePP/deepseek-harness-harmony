@@ -26,6 +26,8 @@ export struct SettingsSheet {
   @Prop initialAppearance: string = 'system'
   @Prop initialFontLevel: string = 'standard'
   @Prop diagnostics: string = ''
+  /** 「今天 +1.2k · 近 7 天 +8.4k」; empty when nothing has been recorded yet. */
+  @Prop usageSummary: string = ''
   @Prop pluginRows: PluginRow[] = []
   onSave: (key: string, model: string) => void = () => {}
   onProfileChange: (profile: string, permissionMode: string) => void = () => {}
@@ -179,6 +181,21 @@ export struct SettingsSheet {
         .width('100%')
 
         Column({ space: 6 }) {
+          // Usage sits above the reading controls: it is the one number here
+          // that changes by itself, so it belongs where the eye lands first.
+          if (this.usageSummary.length > 0) {
+            Row() {
+              Column({ space: 2 }) {
+                Text('用量统计').fontSize(12).fontColor($r('app.color.text_secondary'))
+                Text(this.usageSummary).fontSize(11).fontColor($r('app.color.text_tertiary'))
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+            }
+            .width('100%')
+            .margin({ bottom: 12 })
+          }
+
           Text('对话字号').fontSize(12).fontColor($r('app.color.text_secondary'))
           Row({ space: 8 }) {
             ForEach(FONT_LEVELS, (level: FontLevel) => {

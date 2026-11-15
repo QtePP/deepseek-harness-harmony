@@ -6,6 +6,7 @@ import { goalFromJson, goalSettled, goalStatusLabel, isGoalTool } from '../main/
 import { NodeKind, kindVerb, statusLabel, toolKindOf } from '../main/ets/common/TimelineNode';
 import { isWriteTool, writePathsOf } from '../main/ets/model/Rollback';
 import { refsFromText } from '../main/ets/view/ChatView';
+import { compactCount, dayKey, mergeUsage, usageTotal, UsageDay } from '../main/ets/model/Usage';
 
 /**
  * Tests for the pure projections and formatters.
@@ -97,6 +98,55 @@ export default function localUnitTest() {
         expect(todoSummary(todos)).assertContain('1/2');
         expect(todoSummary(todos)).assertContain('two');
       }
+    });
+  });
+
+  describe('Usage ledger', () => {
+    it('creates the day row on first use and adds to it afterwards', 0, () => {
+      let rows: UsageDay[] = mergeUsage([], '2026-11-15', 120);
+      rows = mergeUsage(rows, '2026-11-15', 80);
+      expect(rows.length).assertEqual(1);
+      expect(rows[0].tokens).assertEqual(200);
+      expect(rows[0].turns).assertEqual(2);
+    });
+
+    it('keeps days separate and sorts newest first', 0, () => {
+      let rows: UsageDay[] = mergeUsage([], '2026-11-14', 10);
+      rows = mergeUsage(rows, '2026-11-15', 20);
+      expect(rows.length).assertEqual(2);
+      expect(rows[0].day).assertEqual('2026-11-15');
+      expect(rows[1].day).assertEqual('2026-11-14');
+    });
+
+    it('does not mutate the input array', 0, () => {
+      const before: UsageDay[] = [{ day: '2026-11-15', tokens: 5, turns: 1 }];
+      mergeUsage(before, '2026-11-15', 5);
+      expect(before[0].tokens).assertEqual(5);
+    });
+
+    it('counts the turn but adds nothing for a non-positive delta', 0, () => {
+      const rows = mergeUsage([], '2026-11-15', 0);
+      expect(rows[0].tokens).assertEqual(0);
+      expect(rows[0].turns).assertEqual(1);
+    });
+
+    it('sums only the newest N rows', 0, () => {
+      let rows: UsageDay[] = mergeUsage([], '2026-11-10', 100);
+      rows = mergeUsage(rows, '2026-11-14', 30);
+      rows = mergeUsage(rows, '2026-11-15', 20);
+      expect(usageTotal(rows, 2)).assertEqual(50);
+      expect(usageTotal(rows, 7)).assertEqual(150);
+    });
+
+    it('formats a day key with zero padding', 0, () => {
+      expect(dayKey(new Date(2026, 0, 5))).assertEqual('2026-01-05');
+      expect(dayKey(new Date(2026, 10, 15))).assertEqual('2026-11-15');
+    });
+
+    it('compacts large counts', 0, () => {
+      expect(compactCount(999)).assertEqual('999');
+      expect(compactCount(1200)).assertEqual('1.2k');
+      expect(compactCount(2500000)).assertEqual('2.5M');
     });
   });
 

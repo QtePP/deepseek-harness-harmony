@@ -259,6 +259,10 @@ ACP 实测契约（勿凭直觉改）：
   `refsFromText` 原来只按完整路径字符串去重，现在「一条是另一条的 `/` 边界后缀」即折叠；
   同名不同目录仍分开。**契约**：chip 展示的是 basename，所以去重键必须比展示名更粗——按路径
   精确去重等于没去重。真机验成：该会话从 3 个 chip 变 1 个。
+  **用量统计（未真机验）**：`model/Usage.ets` 把每轮 `usage_update` 的 delta 累计成日账本
+  （preferences `dsh_usage`，保留 60 天，跨会话），设置页显示「今天 +X · 近 7 天 +Y」。
+  **契约**：delta≤0 时只计轮次、不计 token——上下文注记本来就只在真实增长时报 delta，
+  记 0 会造出「有轮次没用量」的空行。7 个单测；真机验收待设备在线。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。
