@@ -348,6 +348,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: '会话', hint: '切换历史会话' },
   { name: '设置', hint: '打开设置' },
   { name: '待办', hint: '展开或收起待办清单' },
+  { name: '会话详情', hint: '轨迹、改动、文件、进度、上下文、子代理一页看完' },
   { name: '导出对话', hint: '把当前会话写成 Markdown 存进工作区' }
 ]
 
@@ -2113,6 +2114,7 @@ export struct ChatView {
   /** Turns the user typed while a run was live, waiting for it to settle. */
   @Prop queued: string[] = []
   /** The model's standing plan, projected from its latest `todo_write`. */
+  @State detailOpen: boolean = false
   @Prop todos: TodoItem[] = []
   /** Standing objective, projected from the goal tools; '' hides the bar. */
   @Prop goalObjective: string = ''
@@ -2530,6 +2532,8 @@ export struct ChatView {
       this.onOpenSettings()
     } else if (name === '待办') {
       this.todoExpanded = !this.todoExpanded
+    } else if (name === '会话详情') {
+      this.detailOpen = true
     } else if (name === '导出对话') {
       this.onExport()
     }
@@ -3340,5 +3344,123 @@ export struct ChatView {
     }
     .width('100%')
     .height('100%')
+    .bindSheet(this.detailOpen, this.detailSheet(), {
+      height: SheetSize.MEDIUM,
+      dragBar: true,
+      showClose: true,
+      onDisappear: () => {
+        this.detailOpen = false
+      }
+    })
+  }
+
+  /**
+   * One page that answers "what happened in this conversation".
+   *
+   * Every number here is already computed for another surface — the trace for
+   * the step chips, the ledger for the context ring, the write-tool paths for
+   * rollback. This sheet only collects them, because on a phone the answer to
+   * "did it touch my files, and how much did it cost" should not require
+   * scrolling three different panels.
+   */
+  @Builder
+  detailSheet() {
+    Column({ space: 14 }) {
+      Text('会话详情').fontSize(16).fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary')).width('100%')
+
+      this.detailRow('上下文', this.contextDetail())
+      this.detailRow('轨迹', this.traceDetail())
+      this.detailRow('待办', this.todoDetail())
+      this.detailRow('目标', this.goalDetail())
+      this.detailRow('改动文件', this.writeDetail())
+      this.detailRow('产物', `${this.artifacts.length} 个`)
+    }
+    .width('100%')
+    .padding({ left: 20, right: 20, top: 8, bottom: 24 })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  detailRow(label: string, value: string) {
+    Row() {
+      Text(label).fontSize(13).fontColor($r('app.color.text_secondary')).width(72)
+      Text(value).fontSize(13).fontColor($r('app.color.text_primary')).layoutWeight(1)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Top)
+  }
+
+  private contextDetail(): string {
+    const usage = this.contextUsage()
+    if (usage[1] <= 0) {
+      return '还没有用量'
+    }
+    return `${usage[0]} / ${usage[1]}（${Math.round((usage[0] / usage[1]) * 100)}%）`
+  }
+
+  private traceDetail(): string {
+    let steps = 0
+    let failed = 0
+    let agents = 0
+    for (const message of this.messages) {
+      for (const entry of message.trace) {
+        steps++
+        if (entry.status === 'failed') {
+          failed++
+        }
+        if (toolKindOf(entry.name) === NodeKind.SUBAGENT) {
+          agents++
+        }
+      }
+    }
+    if (steps === 0) {
+      return '还没有工具调用'
+    }
+    const parts: string[] = [`${steps} 步`]
+    if (failed > 0) {
+      parts.push(`${failed} 失败`)
+    }
+    if (agents > 0) {
+      parts.push(`${agents} 子代理`)
+    }
+    return parts.join(' · ')
+  }
+
+  private todoDetail(): string {
+    if (this.todos.length === 0) {
+      return '没有待办'
+    }
+    return `${completedCount(this.todos)}/${this.todos.length} 完成`
+  }
+
+  private goalDetail(): string {
+    if (this.goalObjective.length === 0) {
+      return '没有目标'
+    }
+    return `${this.goalObjective}（${goalStatusLabel(this.goalStatus)}）`
+  }
+
+  /** Files the write tools named — the same list rollback would restore. */
+  private writeDetail(): string {
+    const seen = new Set<string>()
+    for (const message of this.messages) {
+      for (const entry of message.trace) {
+        if (!isWriteTool(entry.name)) {
+          continue
+        }
+        for (const path of pathsInToolInput(entry.input)) {
+          seen.add(path)
+        }
+      }
+    }
+    if (seen.size === 0) {
+      return '没有写入文件'
+    }
+    const names: string[] = []
+    for (const path of seen) {
+      names.push(basenameOf(path))
+    }
+    return `${seen.size} 个：${names.slice(0, 3).join('、')}${seen.size > 3 ? ' 等' : ''}`
   }
 }
