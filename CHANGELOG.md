@@ -137,6 +137,13 @@
 
 ### 变更
 
+- **重做 dsh-go 对齐矩阵（v1.1.0 基准）**：dsh-go 已从单工程长成 monorepo（`app/packages/runtime/sdk/services/market/site/tooling`，
+  123 个页面、v1.1.0），旧矩阵过时。新文档 `docs/DSH-GO-PARITY-V2.md` 按九个域逐条对照，
+  每条给 A/B/C 与证据，并列出 7 条硬边界。
+- **勘误：语音输入不是不可做**。旧文写「SDK 不含 `@kit.CoreSpeechKit`」，实测
+  `hms/ets/kits/@kit.CoreSpeechKit.d.ts` 存在，`speechRecognizer` + `textToSpeech` 编译通过；
+  语音输入与朗读从 C 级改为 **A 级**。错因：只查了 `openharmony/ets/kits`，漏了 `hms/ets/kits`。
+
 - **自动化任务（schedule）实测判定为不可行**：dsh 自带 `dsh-schedule` + `dsh-tool-schedule`，
   但插进 ohos profile 后 runtime 报 `pending (waiting for service: sessionController)`——它要的是
   `dsh-api-session-controller`（32 个 peer 依赖、含整套 HTTP API 网关）提供的服务。这不是写个

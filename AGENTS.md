@@ -190,8 +190,13 @@ ACP 实测契约（勿凭直觉改）：
   因为 ACP 没有 `session/export`）；⑬**`@` 文件引用**——`common/WorkspaceFiles.ets` 索引工作区（深度 3 / 300 条 / 跳过
   node_modules 等），4s TTL，插入相对路径；⑭**六套主题色**——`common/Theme.ets` +
   `AppStorage['accent']`，9 个组件 `@StorageLink('accent')` 绑定，只换强调色、背景保持中性。
-  **语音输入暂不可做**：本机 DevEco SDK（API 26）不含 HMS `@kit.CoreSpeechKit`
-  （`ets/kits` 与 `api/@hms.ai.speechRecognizer.d.ts` 均不存在），要做得先引入 HMS Core SDK。
+  **语音输入 / 朗读：上一版结论已勘误（2026-11-15）**。旧文写「本机 SDK 不含 `@kit.CoreSpeechKit`」，
+  实测**存在**：`<DevEco>/sdk/default/hms/ets/kits/@kit.CoreSpeechKit.d.ts` 提供
+  `speechRecognizer`（离线、中文、since 4.1.0）与 `textToSpeech`（中英、三种音色）；
+  写一个 `import { speechRecognizer, textToSpeech } from '@kit.CoreSpeechKit'` 的探针文件，
+  `devecocli check arkts` 直接通过。**因此语音输入与朗读是 A 级（纯客户端可做），不是 C 级**，
+  真机还需确认设备带 `SystemCapability.AI.SpeechRecognizer` / `SystemCapability.AI.TextToSpeech`。
+  旧结论错在只看 `openharmony/ets/kits`，没看 `hms/ets/kits`。
   本地验证：`bash scripts/test.sh arkts local` 全绿（arkts 40 文件 + LocalUnit 通过；
   `entry/src/test/LocalUnit.test.ets` 覆盖 `SecretMask` / `Typography` / `TodoModel` / `GoalModel` /
   `TimelineNode` / `Rollback`（纯函数部分）六个模块，共 27 个用例）。
@@ -418,7 +423,8 @@ ACP 实测契约（勿凭直觉改）：
 | `docs/BUILD.md` | 构建、签名、装机、排障（含受限环境坑） |
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
 | `docs/PLUGIN-MIGRATION.md` | 客户端插件迁移分级（P0/P1/P2/不迁） |
-| `docs/DSH-GO-PARITY.md` | 与 dsh-go（Android 同类客户端）的能力对齐矩阵：现状 × 可行性 A/B/C × 结论；含 ACP 协议边界（无 steering、无投影通道）与「不适用」硬边界 |
+| `docs/DSH-GO-PARITY-V2.md` | **现行**对齐矩阵：以 dsh-go **v1.1.0（`1c465301`，2026-11-15）** 为基准，逐域列 A/B/C + 证据；含硬边界 7 条（终端/网页版/自动化/回放链接/桌宠/图标/手机操控）与性价比排序 |
+| `docs/DSH-GO-PARITY.md` | **历史版**（基于 dsh-go 旧快照，无远程/桌宠/插件 UI）。保留作演进记录；结论以 V2 为准 |
 | `docs/PERSONAL-AGENT.md` | 个人 Agent 与卡片演进方案（Agent Pack / CardSpec / 与 Muse 对比）。**§3–§6 的「垂域卡片做进外壳」方向已停**，文首有 2026-11-12 勘误；保留的是可复用的分析（Muse 对比、度量指标、风险表） |
 | 垂域仓（不在本仓） | <https://github.com/QtePP/Harmony-harness-game>（私有）。游戏的三层——裁判引擎 `@ohos/dsh-sanguo`、棋盘 `SanguoBoard*`、五个 agent pack——都在那边。**本仓不引用它们**：外壳只提供会话/文件/审批/设置，不认识任何垂域概念 |
 | `.workbuddy-ai/memory/` | 本地会话记忆（gitignored，不提交） |
