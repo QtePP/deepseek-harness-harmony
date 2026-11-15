@@ -12,6 +12,12 @@
   这些数字本来就分别存在于轨迹条、上下文环、待办条、回撤快照里，手机上问「它动了我哪些文件、
   花了多少」不该翻三个面板。全部只读，不新增协议。
 
+- **语音输入与朗读真机结论（2026-11-16，手机 6MFGK26527000022）**：这台机器上 **syscap 在、引擎起不来**
+  ——麦克风按钮渲染出来了、授权弹窗与我们写的理由串正常，但 `createEngine` 返回 **1002200001**
+  （设备日志 `AI_COMMON: CreateEngineErrorByCallback Failed to create engine [callback]`）；朗读同样，
+  `AI_TEXT: Create Engine Error! engineNo 0`。两者都指向**离线中文语音包/系统语音包未安装**
+  （系统侧下载项，不在 App 内）。已做降级：识别失败即隐藏按钮并把 `speech_asr_usable=false` 落盘，
+  **force-stop 重启后按钮不再出现**（实测），toast 说明缺什么而不是只报错误码。
 - **语音输入**：输入框左侧麦克风（仅在设备带 `SystemCapability.AI.SpeechRecognizer` 时出现）。
   点一下开麦、再点停止；识别中的中间结果实时替换草稿，最终结果落在输入框里等你确认。
   权限走 `requestPermissionsFromUser('ohos.permission.MICROPHONE')`，拒绝时给 toast 而不是反复弹框。
