@@ -281,6 +281,15 @@ ACP 实测契约（勿凭直觉改）：
   并点名 DSH 专有的 cards / plans / titles / todos / terminal views **不在 ACP 里**——
   这为我们「从 tool_call 反推待办/目标」的做法提供了官方依据。工具面差异与新工具见
   `docs/DSH-GO-PARITY-V2.md` §11.5。
+- **升级后工具表已本地实测（2026-11-15，不需要设备）**：本地起 `--profile ohos` 并等 boot-report，
+  `bridge.log` 给出 **`tools(25)`**：`create_goal, edit, exit_plan_mode, get_goal, glob, grep,
+  list_agents, read, read_image, send_message, skill, subagent, subagent_fork, team_task_create,
+  team_task_get, team_task_list, team_task_update, todo_write, update_goal, wait_agent, web_fetch,
+  web_search, workflow, working_directory, write`。
+  **这条证据替代了「必须真机确认工具表」的担心**：native executor 生效、`glob`/`grep` 仍是纯 JS 实现、
+  没有 `bash`/`job_*`/`run_code`，符合预期。**0.2.2 白送的新工具**：`workflow`（多智能体编排）、
+  `team_task_*` 四个（agent-team）、`read_image`、`exit_plan_mode`、`working_directory`、`wait_agent`。
+  工具数从 21 → 25。
 - **in-process PTC 运行时已交付并真机闭环（2026-10-27，P1①）**：
   `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
   `dsh-bundle-ohos` patch 禁 stock `ptc-runtime`；`tools` 行现为 `mode: native`

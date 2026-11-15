@@ -169,6 +169,7 @@
      按名字剪掉后启动报「2 required plugins did not activate」。已把该包从剪枝名单移除，
      并在脚本注释里写死「只剪惰性加载/永不加载的包，改完必须跑启动冒烟」。
   验证：`--dump-config` 106 行、`tool-fs-search` 仍禁用 + `tool-fs-search-ohos` 仍挂载、
+  本地起 runtime 读 boot-report 得到 **`tools(25)`**（含 `glob`/`grep` 纯 JS 实现，无 `bash`/`job_*`/`run_code`），
   启动冒烟**零警告**、插件单测 fs-search 38/38、ptc 22/22（含 `--jitless`）、credentials 8/8、
   ArkTS 40 文件 + LocalUnit 全绿、HAP 构建通过（352MB）。
 
