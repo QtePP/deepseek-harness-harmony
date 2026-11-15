@@ -262,6 +262,13 @@ ACP 实测契约（勿凭直觉改）：
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。
+- **官方 dsh 上游已核对（2026-11-15）**：`deepseek-ai/deepseek-harness` master `39163dd3`
+  = `dsh` **0.2.2-rc.3**，我们载荷钉的是 0.2.1-rc.4。**ACP 协议面没变**（9 方法 +
+  `$/cancel_request`、5 种 `session/update`、`session/request_permission`），客户端无需改动。
+  官方 ACP README 明确写「intentionally exposes only the standard ACP v1 surface」，
+  并点名 DSH 专有的 cards / plans / titles / todos / terminal views **不在 ACP 里**——
+  这为我们「从 tool_call 反推待办/目标」的做法提供了官方依据。工具面差异与新工具见
+  `docs/DSH-GO-PARITY-V2.md` §11.5。
 - **in-process PTC 运行时已交付并真机闭环（2026-10-27，P1①）**：
   `@ohos/dsh-ptc-runtime-vm`（worker_threads + `node:vm`）挂进 `ohos` profile，
   `dsh-bundle-ohos` patch 禁 stock `ptc-runtime`；`tools` 行现为 `mode: native`

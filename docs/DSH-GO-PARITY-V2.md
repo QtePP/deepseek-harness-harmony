@@ -130,6 +130,37 @@ dsh-go 已经从「一个安卓聊天客户端」长成了「**本机引擎 + �
 7. **手机操控**：技术上可做（`AccessibilityExtensionAbility` 在 SDK 里），但等于重写一个无障碍代理，
    且要过系统权限审批——不是「抄一段 UI」的量级。
 
+## 11.5 官方 dsh 上游（2026-11-15 拉取）
+
+基准：`deepseek-ai/deepseek-harness` master `39163dd3`（release 同步提交，`dsh` **0.2.2-rc.3**）。
+我们载荷里钉的是 **0.2.1-rc.4**。
+
+**协议面：没变。** 逐条核对 `packages/acp/acp/README.md` 与源码，仍是
+`initialize / session/new / session/list / session/resume / session/close /
+session/set_config_option / session/prompt / session/cancel（+ `$/cancel_request`）`，
+服务端通知仍是 `session/update`（5 种 kind：`agent_message_chunk` / `agent_thought_chunk` /
+`tool_call` / `tool_call_update` / `usage_update`）与 `session/request_permission`。
+**结论：我们的客户端对 0.2.2 仍然兼容，不需要改协议代码。**
+
+官方 README 里还有一句对我们特别重要的定性：
+
+> this server intentionally exposes only the standard ACP v1 surface …
+> Avoid it when a human needs DSH-specific presentation cards, plans, titles, todos,
+> terminal views, or elicitation.
+
+这等于官方承认：**待办/计划/标题/卡片/终端视图不在 ACP 里，是有意为之**。
+我们从 `tool_call.rawInput` 反推待办/目标的做法，是这个约束下的唯一出路，不是权宜之计。
+
+**工具面：官方比我们多 5 个包**（载荷里没有）：
+`tool-agent-team`、`tool-lsp`、`tool-office`（koffi，签名域外无法加载）、
+`tool-subagent-oar`、`tool-worktree`（要 git）。
+我们载荷里其实**已经有** `tool-schedule` / `tool-jobs` / `tool-terminal` / `tool-workflow` / `tool-present`，
+卡住的从来不是包，是宿主服务（§11.3）。
+
+**要不要升级载荷？** 收益 = 新工具 + 上游修 bug；成本 = 重跑 `assemble-payload`
+（618 包重装 + 225MB 重打）+ 全量回归。协议不变，所以**不升级也不会坏**；
+建议单独开一轮做「升 0.2.2 并回归」，而不是夹在功能开发里。
+
 ## 12. 与「三端一致」的关系
 
 dsh-go 覆盖 Android（+ 桌面/网页形态）；本仓覆盖鸿蒙手机/平板/2in1。

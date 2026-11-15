@@ -137,6 +137,12 @@
 
 ### 变更
 
+- **核对官方 dsh 上游**（`39163dd3` = 0.2.2-rc.3，我们钉 0.2.1-rc.4）：**ACP 协议面未变**
+  （9 方法 + `$/cancel_request`、5 种 `session/update`），客户端不需要改。官方 README 明确
+  「只暴露标准 ACP v1 面」，并点名 cards/plans/titles/todos/terminal views 不在其中——
+  这解释了为什么待办只能从 `tool_call` 反推。载荷比官方少 5 个工具包（agent-team/lsp/office/
+  subagent-oar/worktree），但 schedule/jobs/terminal 其实都有，卡的是宿主服务。
+
 - **重做 dsh-go 对齐矩阵（v1.1.0 基准）**：dsh-go 已从单工程长成 monorepo（`app/packages/runtime/sdk/services/market/site/tooling`，
   123 个页面、v1.1.0），旧矩阵过时。新文档 `docs/DSH-GO-PARITY-V2.md` 按九个域逐条对照，
   每条给 A/B/C 与证据，并列出 7 条硬边界。
