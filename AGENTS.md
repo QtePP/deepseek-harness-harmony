@@ -205,6 +205,10 @@ ACP 实测契约（勿凭直觉改）：
   （模型是单独下载项，不在 App 内）。**降级已验证**：识别失败后按钮立刻隐藏，并把
   `speech_asr_usable=false` 写进 preferences，重启后不再出现（实测 force-stop 重启后按钮消失）；
   toast 文案「语音引擎启动失败（1002200001）：可能缺少离线中文语音包」。
+  **复位入口**：设置页在 `!speechAsrUsable` 时显示「语音输入 / 重试」一行，点重试清标志并写
+  `AppStorage['speechAsrUsable']`——`ChatView` 用 `@StorageLink` 绑这个 key，所以装好语音包后
+  **不用重装 App**，回对话就有麦克风。**设备限制记录**：平板 `6HT0125B29000226` 装不上
+  （`code:9568297 install failed due to older sdk version`），只有手机能跑；重试流程本轮未真机验。
   麦克风按钮仅在 `canIUse('SystemCapability.AI.SpeechRecognizer')` 为真时渲染；朗读入口在长按菜单，
   同样先查 `SystemCapability.AI.TextToSpeech`。**API 签名坑**：`startListening` 的 `StartParams`
   必填 `audioInfo{audioType:'pcm',sampleRate:16000,soundChannel:1,sampleBit:16}`；

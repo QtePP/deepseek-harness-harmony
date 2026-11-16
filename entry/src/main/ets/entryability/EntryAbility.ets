@@ -13,6 +13,7 @@ export default class EntryAbility extends UIAbility {
     // rebuilds the window and blanks the ArkUI tree on this device.
     try {
       AppConfig.applyAppearanceAtBoot(this.context);
+      AppConfig.applySpeechAtBoot(this.context);
     } catch (err) {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }

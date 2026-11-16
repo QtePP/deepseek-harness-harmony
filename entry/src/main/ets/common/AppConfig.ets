@@ -156,12 +156,25 @@ export class AppConfig {
     }
   }
 
+  /**
+   * Publish the flag into AppStorage at boot.
+   *
+   * The composer binds to AppStorage rather than reading preferences itself, so
+   * resetting the flag from Settings makes the microphone come back without a
+   * restart — the sheet and the chat are different components and only shared
+   * state reaches both.
+   */
+  static applySpeechAtBoot(context: common.UIAbilityContext): void {
+    AppStorage.setOrCreate('speechAsrUsable', AppConfig.speechAsrUsable(context))
+  }
+
   /** Called once after the engine refuses to construct. */
   static setSpeechAsrUsable(context: common.UIAbilityContext, usable: boolean): void {
     try {
       const store = preferences.getPreferencesSync(context, { name: AppConfig.STORE })
       store.putSync('speech_asr_usable', usable)
       store.flush()
+      AppStorage.setOrCreate('speechAsrUsable', usable)
     } catch (error) {
       // Losing the flag only costs one extra tap next launch.
     }

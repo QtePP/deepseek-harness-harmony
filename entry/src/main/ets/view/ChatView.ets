@@ -2094,7 +2094,12 @@ export struct ChatView {
   @State draft: string = ''
   /** True while the microphone is open; the button doubles as a stop control. */
   @State dictating: boolean = false
-  /** Set once a device without the speech syscap is detected, to hide the button. */
+  /**
+   * Whether the microphone may be offered: the syscap must exist and the engine
+   * must not have failed before. Bound to AppStorage so a reset in Settings
+   * brings the button back without a restart.
+   */
+  @StorageLink('speechAsrUsable') speechAsrUsable: boolean = true
   @State speechReady: boolean = false
   /** Draft as it stood when dictation began; partials replace everything after it. */
   private dictationBase: string = ''
@@ -2195,8 +2200,7 @@ export struct ChatView {
     this.syncTypingTimer()
     // Capability, not permission: a device without the speech syscap gets no
     // microphone at all, so the button never appears and then fails.
-    const speechContext = this.getUIContext().getHostContext() as common.UIAbilityContext
-    this.speechReady = speechSupported() && AppConfig.speechAsrUsable(speechContext)
+    this.speechReady = speechSupported()
   }
 
   aboutToDisappear(): void {
@@ -2242,9 +2246,8 @@ export struct ChatView {
         // A syscap can be advertised while the engine still cannot start (the
         // offline model is a separate download). Hiding the button is the
         // honest reaction: offering it again would just fail again.
-        this.speechReady = false
         // Remember it: the model is a system download, so it will not appear by
-        // itself between launches.
+        // itself between launches. Settings can clear it once it is installed.
         const failedContext = this.getUIContext().getHostContext() as common.UIAbilityContext
         AppConfig.setSpeechAsrUsable(failedContext, false)
         this.getUIContext().getPromptAction().showToast({ message: message, duration: 3500 })
@@ -3262,7 +3265,7 @@ export struct ChatView {
 
               // Dictation sits before the image picker: speaking is the faster
               // way in, and it is the control people reach for most.
-              if (this.speechReady) {
+              if (this.speechReady && this.speechAsrUsable) {
                 Button({ type: ButtonType.Circle }) {
                   Image($r('app.media.icon_mic'))
                     .width(16)

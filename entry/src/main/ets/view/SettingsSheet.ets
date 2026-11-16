@@ -1,3 +1,4 @@
+import { common } from '@kit.AbilityKit'
 import { PluginRow } from '../model/PluginCatalog'
 import { AppConfig } from '../common/AppConfig'
 import { THEMES, ThemeOption } from '../common/Theme'
@@ -28,6 +29,8 @@ export struct SettingsSheet {
   @Prop diagnostics: string = ''
   /** 「今天 +1.2k · 近 7 天 +8.4k」; empty when nothing has been recorded yet. */
   @Prop usageSummary: string = ''
+  /** False once the speech engine refused to start; offers a retry below. */
+  @StorageLink('speechAsrUsable') speechAsrUsable: boolean = true
   @Prop pluginRows: PluginRow[] = []
   onSave: (key: string, model: string) => void = () => {}
   onProfileChange: (profile: string, permissionMode: string) => void = () => {}
@@ -181,6 +184,37 @@ export struct SettingsSheet {
         .width('100%')
 
         Column({ space: 6 }) {
+          // Only when the engine has actually failed: a retry row on a working
+          // device would be a button that changes nothing.
+          if (!this.speechAsrUsable) {
+            Row({ space: 8 }) {
+              Column({ space: 2 }) {
+                Text('语音输入').fontSize(12).fontColor($r('app.color.text_secondary'))
+                Text('上次引擎启动失败，装好离线语音包后点右边重试')
+                  .fontSize(11).fontColor($r('app.color.text_tertiary'))
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+
+              Button('重试')
+                .fontSize(12)
+                .height(30)
+                .backgroundColor($r('app.color.surface_muted'))
+                .fontColor($r('app.color.text_primary'))
+                .onClick(() => {
+                  const context = this.getUIContext().getHostContext() as common.UIAbilityContext
+                  AppConfig.setSpeechAsrUsable(context, true)
+                  this.getUIContext().getPromptAction().showToast({
+                    message: '已重置，回到对话即可看到麦克风',
+                    duration: 2200
+                  })
+                })
+            }
+            .width('100%')
+            .margin({ bottom: 12 })
+            .alignItems(VerticalAlign.Center)
+          }
+
           // Usage sits above the reading controls: it is the one number here
           // that changes by itself, so it belongs where the eye lands first.
           if (this.usageSummary.length > 0) {
