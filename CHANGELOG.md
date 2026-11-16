@@ -7,6 +7,17 @@
 
 ### 新增
 
+- **互联（第一批）：同一 WiFi 直连 + 中继 + 剪贴板**。`common/Interop.ets` 定义统一信封
+  `{v,id,from,at,text}`（换行分帧，和 ACP 桥同一套约定）与三条通道；`view/InteropSheet.ets`
+  挂在 设置 ›「互联」展开：显示本机地址、开房间、加入对方地址、连中继、发消息、消息日志，
+  下面如实列出六条通道的可用性（不可用的灰着写原因）。
+  **`LanChannel`**：`TCPSocketServer.listen(0.0.0.0:4518)` + 一个客人，双向收发；
+  **`WebSocketChannel`**：同信封走中继；**`ClipboardChannel`**：复制/粘贴本机地址。
+  **边界写死**：一对一、LAN 明文不加密、默认不监听（退出面板即关）、收到的消息只进面板日志
+  **不自动进对话**（别人的文字不能直接变成我的 prompt）。
+  **产品面见 `docs/INTEROP-PRODUCT.md`**：三条通道分别对应「递手机」「实时分享链接」「零门槛兜底」。
+  5 个信封/分帧单测（含「一次 read 只到半条消息」这个会静默并包的坑）。
+
 - **`docs/INTEROP-APIS.md`：与其他应用/用户通信的能力盘点**。结论：双向通信的底层**已经有了**
   ——`@ohos.net.socket` 的 TCP 长连接（现在连 `127.0.0.1:4517` 本地桥）+ HTTP；缺的是「对端」不是 API。
   可加且权限够的：WebSocket（`INTERNET` 是 normal，最省事的中继方案）、局域网 TCP 直连、

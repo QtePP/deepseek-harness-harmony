@@ -6,6 +6,7 @@ import { goalFromJson, goalSettled, goalStatusLabel, isGoalTool } from '../main/
 import { NodeKind, kindVerb, statusLabel, toolKindOf } from '../main/ets/common/TimelineNode';
 import { isWriteTool, writePathsOf } from '../main/ets/model/Rollback';
 import { refsFromText } from '../main/ets/view/ChatView';
+import { decodeEnvelope, encodeEnvelope, keepRemainder, makeEnvelope, takeLines } from '../main/ets/common/Interop';
 import { compactCount, dayKey, mergeUsage, usageTotal, UsageDay } from '../main/ets/model/Usage';
 import { spokenForm } from '../main/ets/common/ReadAloud';
 
@@ -203,6 +204,48 @@ export default function localUnitTest() {
     it('respects the limit', 0, () => {
       const refs = refsFromText('a.md b.md c.md d.md e.md f.md', 3);
       expect(refs.length).assertEqual(3);
+    });
+  });
+
+  describe('Interop envelope', () => {
+    it('round-trips one message through the wire format', 0, () => {
+      const envelope = makeEnvelope('Pixel', '你好', 1700000000000);
+      const line = encodeEnvelope(envelope);
+      expect(line.endsWith('\n')).assertTrue();
+      const back = decodeEnvelope(line);
+      expect(back === null).assertFalse();
+      if (back !== null) {
+        expect(back.text).assertEqual('你好');
+        expect(back.from).assertEqual('Pixel');
+        expect(back.id).assertEqual(envelope.id);
+      }
+    });
+
+    it('rejects a different envelope version instead of guessing', 0, () => {
+      expect(decodeEnvelope('{"v":2,"id":"a","from":"b","at":1,"text":"c"}') === null).assertTrue();
+    });
+
+    it('rejects a line that is not an envelope at all', 0, () => {
+      expect(decodeEnvelope('hello') === null).assertTrue();
+      expect(decodeEnvelope('') === null).assertTrue();
+      expect(decodeEnvelope('{"v":1,"id":"a"}') === null).assertTrue();
+    });
+
+    it('splits a read that carries half a message', 0, () => {
+      // A TCP read is not a message boundary; this is the case that silently
+      // merges two messages if the remainder is dropped.
+      const partial = '{"v":1,"id":"a","from":"x","at":1,"text":"one"}\n{"v":1,"id":"b","from":"x"';
+      const lines = takeLines(partial);
+      expect(lines.length).assertEqual(1);
+      expect(decodeEnvelope(lines[0]) === null).assertFalse();
+      const rest = keepRemainder(partial);
+      expect(rest.startsWith('{"v":1,"id":"b"')).assertTrue();
+      expect(decodeEnvelope(rest) === null).assertTrue();
+    });
+
+    it('keeps everything when no newline has arrived yet', 0, () => {
+      expect(takeLines('partial').length).assertEqual(0);
+      expect(keepRemainder('partial')).assertEqual('partial');
     });
   });
 

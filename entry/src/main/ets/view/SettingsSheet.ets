@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit'
+import { InteropSheet } from './InteropSheet'
 import { PluginRow } from '../model/PluginCatalog'
 import { AppConfig } from '../common/AppConfig'
 import { LocalModel, LocalModelStore, scanLocalModels } from '../common/LocalModel'
@@ -34,6 +35,7 @@ export struct SettingsSheet {
   /** False once the speech engine refused to start; offers a retry below. */
   @StorageLink('speechAsrUsable') speechAsrUsable: boolean = true
   /** Local model discovery: results of the last scan, and what is adopted now. */
+  @State showInterop: boolean = false
   @State scanning: boolean = false
   @State scanned: LocalModel[] = []
   @State scannedOnce: boolean = false
@@ -338,6 +340,30 @@ export struct SettingsSheet {
             }
             .width('100%')
             .margin({ bottom: 12 })
+          }
+
+          // 互联：默认收起。它不是每次都要用的开关，而是一块独立面板；
+          // 展开才显示通道清单，收起时只占一行。
+          Row() {
+            Column({ space: 2 }) {
+              Text('互联').fontSize(12).fontColor($r('app.color.text_secondary'))
+              Text(this.showInterop ? '同一 WiFi 直接连，不需要账号' : '和另一台装了本应用的设备互发消息')
+                .fontSize(11).fontColor($r('app.color.text_tertiary'))
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+            Text(this.showInterop ? '收起' : '展开')
+              .fontSize(12)
+              .fontColor(this.accent)
+          }
+          .width('100%')
+          .margin({ bottom: this.showInterop ? 8 : 12 })
+          .onClick(() => {
+            this.showInterop = !this.showInterop
+          })
+
+          if (this.showInterop) {
+            InteropSheet()
           }
 
           Text('对话字号').fontSize(12).fontColor($r('app.color.text_secondary'))
