@@ -205,10 +205,16 @@ ACP 实测契约（勿凭直觉改）：
   （模型是单独下载项，不在 App 内）。**降级已验证**：识别失败后按钮立刻隐藏，并把
   `speech_asr_usable=false` 写进 preferences，重启后不再出现（实测 force-stop 重启后按钮消失）；
   toast 文案「语音引擎启动失败（1002200001）：可能缺少离线中文语音包」。
-  **复位入口**：设置页在 `!speechAsrUsable` 时显示「语音输入 / 重试」一行，点重试清标志并写
+  **复位入口（已真机验，2026-11-16，CMM-AL10 / API 26）**：设置页在 `!speechAsrUsable` 时显示「语音输入 / 重试」一行，点重试清标志并写
   `AppStorage['speechAsrUsable']`——`ChatView` 用 `@StorageLink` 绑这个 key，所以装好语音包后
   **不用重装 App**，回对话就有麦克风。**设备限制记录**：平板 `6HT0125B29000226` 装不上
-  （`code:9568297 install failed due to older sdk version`），只有手机能跑；重试流程本轮未真机验。
+  （`code:9568297 install failed due to older sdk version`），只有手机能跑。
+  **重试流程已真机验**：点麦克风 → 授权 → 引擎失败 → 输入框麦克风消失 → 设置出现
+  「语音输入 / 上次引擎启动失败，装好离线语音包后点右边重试 [重试]」→ 点重试 → 该行消失 →
+  回对话麦克风回来（**未重装、未重启**）。
+  **工具表差异的结论**：新手机 boot-report 是 `tools(21)`、缺 `read/write/edit/read_image`，
+  一度怀疑是升级回归；查 `files/patches/user.patch.yml` 发现是本机**能力开关把 `tool-fs` 关了**
+  （`- id: tool-fs / disabled: true`）——不是 bug，是开关生效。旧手机那份 patch 没关，所以 25 个。
   麦克风按钮仅在 `canIUse('SystemCapability.AI.SpeechRecognizer')` 为真时渲染；朗读入口在长按菜单，
   同样先查 `SystemCapability.AI.TextToSpeech`。**API 签名坑**：`startListening` 的 `StartParams`
   必填 `audioInfo{audioType:'pcm',sampleRate:16000,soundChannel:1,sampleBit:16}`；
