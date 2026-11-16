@@ -480,6 +480,7 @@ ACP 实测契约（勿凭直觉改）：
 | `docs/BUILD.md` | 构建、签名、装机、排障（含受限环境坑） |
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
 | `docs/PLUGIN-MIGRATION.md` | 客户端插件迁移分级（P0/P1/P2/不迁） |
+| `docs/INTEROP-APIS.md` | **与其他应用/用户通信的能力盘点**：已用的 6 条（TCP 桥/HTTP/ShareKit/通知/Want/Web）+ 可加的 15 条（WebSocket、局域网 TCP、分布式数据对象、BLE/SPP、星闪、RPC、DataShare…）+ 4 条权限卡死（短信/设备发现/通知控制器/悬浮窗）+ 三条落地路线与成本 |
 | `docs/DSH-GO-PARITY-V2.md` | **现行**对齐矩阵：以 dsh-go **v1.1.0（`1c465301`，2026-11-15）** 为基准，逐域列 A/B/C + 证据；含硬边界 7 条（终端/网页版/自动化/回放链接/桌宠/图标/手机操控）与性价比排序 |
 | `docs/DSH-GO-PARITY.md` | **历史版**（基于 dsh-go 旧快照，无远程/桌宠/插件 UI）。保留作演进记录；结论以 V2 为准 |
 | `docs/PERSONAL-AGENT.md` | 个人 Agent 与卡片演进方案（Agent Pack / CardSpec / 与 Muse 对比）。**§3–§6 的「垂域卡片做进外壳」方向已停**，文首有 2026-11-12 勘误；保留的是可复用的分析（Muse 对比、度量指标、风险表） |

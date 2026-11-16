@@ -7,6 +7,14 @@
 
 ### 新增
 
+- **`docs/INTEROP-APIS.md`：与其他应用/用户通信的能力盘点**。结论：双向通信的底层**已经有了**
+  ——`@ohos.net.socket` 的 TCP 长连接（现在连 `127.0.0.1:4517` 本地桥）+ HTTP；缺的是「对端」不是 API。
+  可加且权限够的：WebSocket（`INTERNET` 是 normal，最省事的中继方案）、局域网 TCP 直连、
+  `distributedDataObject`（`DISTRIBUTED_DATASYNC` 也是 normal，但只覆盖**同一华为账号**的设备）、
+  BLE/SPP（`ACCESS_BLUETOOTH` normal）、星闪、RPC、DataShare。
+  **权限卡死**：短信收发、系统级设备发现、通知控制器、悬浮窗都是 `system_basic` 以上，三方应用拿不到。
+  另记两条架构前提：桥是单客户端（新连接顶掉旧的）、后台长连接会被冻结。
+
 - **本地模型接入（扫描式）**：设置 ›「本地模型」→「扫描」——应用自己去问本机上那些 OpenAI 兼容端口
   （8080 / 8000 / 11434 / 1234 / 5000 / 7860 / 8001 / 9000 / 18080 / 3000 / 4000 / 8888），
   谁能回 `/v1/models` 就把它的模型名列出来，点「接入」即写进 `user.patch.yml` 的 `llm-pi-ai` 路由
