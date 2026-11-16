@@ -1,6 +1,8 @@
 import { common } from '@kit.AbilityKit'
 import { PluginRow } from '../model/PluginCatalog'
 import { AppConfig } from '../common/AppConfig'
+import { LocalModel, LocalModelStore, scanLocalModels } from '../common/LocalModel'
+import { PluginConfig } from '../common/PluginConfig'
 import { THEMES, ThemeOption } from '../common/Theme'
 import { FONT_LEVELS, FontLevel } from '../common/Typography'
 
@@ -31,6 +33,11 @@ export struct SettingsSheet {
   @Prop usageSummary: string = ''
   /** False once the speech engine refused to start; offers a retry below. */
   @StorageLink('speechAsrUsable') speechAsrUsable: boolean = true
+  /** Local model discovery: results of the last scan, and what is adopted now. */
+  @State scanning: boolean = false
+  @State scanned: LocalModel[] = []
+  @State scannedOnce: boolean = false
+  @State adopted: LocalModel | null = null
   @Prop pluginRows: PluginRow[] = []
   onSave: (key: string, model: string) => void = () => {}
   onProfileChange: (profile: string, permissionMode: string) => void = () => {}
@@ -54,6 +61,10 @@ export struct SettingsSheet {
     this.accentId = this.initialAccent
     this.appearance = this.initialAppearance
     this.fontLevel = this.initialFontLevel
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext
+    LocalModelStore.load(context).then((model: LocalModel | null) => {
+      this.adopted = model
+    })
   }
 
   private permissionHint(mode: string): string {
@@ -184,6 +195,105 @@ export struct SettingsSheet {
         .width('100%')
 
         Column({ space: 6 }) {
+          // Local model: the ports are asked, not the user. A phone that "has a
+          // model deployed" means some app serves it on loopback, and nobody
+          // can be expected to find that port by hand.
+          Text('本地模型').fontSize(12).fontColor($r('app.color.text_secondary'))
+          Text('扫描本机的 OpenAI 兼容服务（llama.cpp / Ollama / MNN 等），接入后出现在模型选择器里')
+            .fontSize(11).fontColor($r('app.color.text_tertiary')).width('100%')
+
+          Row({ space: 8 }) {
+            Button(this.scanning ? '扫描中…' : '扫描')
+              .fontSize(12)
+              .height(30)
+              .enabled(!this.scanning)
+              .backgroundColor($r('app.color.surface_muted'))
+              .fontColor($r('app.color.text_primary'))
+              .onClick(() => {
+                this.scanning = true
+                this.scanned = []
+                const context = this.getUIContext().getHostContext() as common.UIAbilityContext
+                scanLocalModels().then((hits: LocalModel[]) => {
+                  this.scanned = hits
+                  this.scannedOnce = true
+                  this.scanning = false
+                  if (hits.length === 0) {
+                    this.getUIContext().getPromptAction().showToast({
+                      message: '没找到本地模型服务：确认它已启动并监听本机端口',
+                      duration: 2600
+                    })
+                  }
+                })
+              })
+            if (this.adopted !== null) {
+              Button('断开')
+                .fontSize(12)
+                .height(30)
+                .backgroundColor($r('app.color.surface_muted'))
+                .fontColor($r('app.color.status_danger'))
+                .onClick(() => {
+                  const context = this.getUIContext().getHostContext() as common.UIAbilityContext
+                  LocalModelStore.save(context, null).then(() => {
+                    PluginConfig.localModel = null
+                    PluginConfig.applyPatch(context)
+                    this.adopted = null
+                    this.getUIContext().getPromptAction().showToast({
+                      message: '已断开本地模型，重启应用生效', duration: 2600
+                    })
+                  })
+                })
+            }
+          }
+          .width('100%')
+          .margin({ top: 8, bottom: 6 })
+
+          if (this.adopted !== null) {
+            Text(`已接入：${this.adopted.modelId} @ ${this.adopted.baseUrl}`)
+              .fontSize(11)
+              .fontColor($r('app.color.status_success'))
+              .width('100%')
+              .margin({ bottom: 6 })
+          }
+
+          ForEach(this.scanned, (hit: LocalModel) => {
+            Row({ space: 8 }) {
+              Column({ space: 2 }) {
+                Text(hit.modelId).fontSize(12).fontColor($r('app.color.text_primary'))
+                Text(`${hit.baseUrl} · ${hit.allIds.length} 个模型`)
+                  .fontSize(10).fontColor($r('app.color.text_tertiary'))
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+
+              Button('接入')
+                .fontSize(12)
+                .height(28)
+                .backgroundColor(this.accent)
+                .onClick(() => {
+                  const context = this.getUIContext().getHostContext() as common.UIAbilityContext
+                  LocalModelStore.save(context, hit).then(() => {
+                    PluginConfig.localModel = hit
+                    PluginConfig.applyPatch(context)
+                    this.adopted = hit
+                    this.getUIContext().getPromptAction().showToast({
+                      message: '已接入，彻底退出应用再打开即可在选择器里看到它',
+                      duration: 3000
+                    })
+                  })
+                })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+            .padding({ top: 4, bottom: 4 })
+          }, (hit: LocalModel) => hit.baseUrl)
+
+          if (this.scannedOnce && this.scanned.length === 0) {
+            Text('没有发现：端口 8080 / 8000 / 11434 / 1234 等都没有响应 /v1/models')
+              .fontSize(11).fontColor($r('app.color.text_tertiary')).width('100%')
+          }
+
+          Divider().color($r('app.color.divider')).margin({ top: 10, bottom: 10 })
+
           // Only when the engine has actually failed: a retry row on a working
           // device would be a button that changes nothing.
           if (!this.speechAsrUsable) {

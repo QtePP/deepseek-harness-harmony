@@ -11,6 +11,7 @@ import { PluginConfig } from '../common/PluginConfig'
 import { PluginCatalog, PluginRow } from '../model/PluginCatalog'
 import { ChatMessage, ContentHit, Role, SessionStore, SessionSummary, ToolTrace, newSessionId, titleOf } from '../model/ChatModel'
 import { UsageStore } from '../model/Usage'
+import { LocalModel, LocalModelStore, scanLocalModels } from '../common/LocalModel'
 import { ProjectStore, ProjectSummary } from '../model/ProjectModel'
 import { renderBlocks, RenderedBlock } from '../model/DshClient'
 import { DirGrant } from '../host/DirGrant'
@@ -271,6 +272,9 @@ struct Index {
     this.context = context
     Notify.attach(context)
     await AppConfig.load(context)
+    // The adopted local model has to be in place before load(), because load()
+    // rewrites user.patch.yml and the runtime reads that file at boot.
+    PluginConfig.localModel = await LocalModelStore.load(context)
     await PluginConfig.load(context)
     this.pluginRows = PluginCatalog.rows(PluginConfig.disabled)
     await this.projectStore.init(context)

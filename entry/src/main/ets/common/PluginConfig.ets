@@ -1,5 +1,6 @@
 import { common } from '@kit.AbilityKit'
 import { preferences } from '@kit.ArkData'
+import { LocalModel } from './LocalModel'
 import { fileIo as fs } from '@kit.CoreFileKit'
 
 /**
@@ -21,6 +22,8 @@ export class PluginConfig {
 
   /** Entry ids the user switched off; empty means "platform defaults". */
   static disabled: Set<string> = new Set<string>()
+  /** Local model server to register as a provider route, when one is adopted. */
+  static localModel: LocalModel | null = null
 
   static async load(context: common.UIAbilityContext): Promise<void> {
     PluginConfig.store = await preferences.getPreferences(context, PluginConfig.STORE)
@@ -68,7 +71,8 @@ export class PluginConfig {
       PluginConfig.disabled.forEach((id: string) => {
         ids.push(id)
       })
-      if (ids.length === 0) {
+      const model = PluginConfig.localModel
+      if (ids.length === 0 && model === null) {
         if (fs.accessSync(file)) {
           fs.unlinkSync(file)
         }
@@ -81,6 +85,23 @@ export class PluginConfig {
       for (const id of ids) {
         lines.push(`- id: ${id}`)
         lines.push('  disabled: true')
+        lines.push('')
+      }
+      if (model !== null) {
+        // The pi-ai row is mounted dormant by dsh-base; a provider profile is
+        // what makes it register routes. `api: openai-completions` is the wire
+        // protocol every local server (llama.cpp, vLLM, Ollama /v1, MNN) speaks.
+        // No apiKeyEnv: a loopback server does not authenticate, and inventing
+        // an env var the runtime cannot read would fail the route validation.
+        lines.push('- id: llm-pi-ai')
+        lines.push('  config:')
+        lines.push('    providers:')
+        lines.push('      local:')
+        lines.push('        api: openai-completions')
+        lines.push(`        baseURL: ${model.baseUrl}`)
+        lines.push('        models:')
+        lines.push(`          "${model.modelId}":`)
+        lines.push(`            contextWindow: ${model.contextWindow}`)
         lines.push('')
       }
       const out = fs.openSync(file, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC)
