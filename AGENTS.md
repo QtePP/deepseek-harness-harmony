@@ -390,6 +390,12 @@ ACP 实测契约（勿凭直觉改）：
   `build-profile.signing.json5` 指向它，2026-10-31 起）：老自动签名 Profile 的 `acls`
   为空，而 module.json5 自 03a252d 起声明 `FILE_ACCESS_PERSIST`，空 ACL 的包装不上；
   试用 Profile 与老 .p12 同证书（指纹一致，hvigor 签名链不变）、含该 ACL、绑手机/平板 UDID。
+  **2026-11-16 更新**：这条老坑在当前 CLI 上**已不成立**——新手机（SGT-AL10）不在旧 profile 的
+  3 个 UDID 里，装机报 `code:9568423 device is unauthorized`；跑 `devecocli signature generate --force`
+  后自动生成的新 profile **含 4 个 UDID 且带 `FILE_ACCESS_PERSIST` ACL**（CLI 自己打印
+  「You are applying for restricted ACL permissions: FILE_ACCESS_PERSIST」），装上了。
+  **所以换新设备时不必再手工找 AGC 加 UDID，先跑这条命令。**
+  注意它会把签名内联写进受版本控制的 `build-profile.json5`——装完必须 `git checkout build-profile.json5`。
 - 发布签名走 `scripts/build-release.sh`（三步，签名在 hvigor 之外）：`--build-mode release
   --assemble-type assembleApp` 一次构建出未签名 HAP 与 .app → DevEco SDK 的
   `hap-sign-tool sign-app` 以明文密码给 HAP 本地签名（签名链自检用，见下）→ `hap-sign-tool
