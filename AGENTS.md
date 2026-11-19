@@ -490,7 +490,8 @@ ACP 实测契约（勿凭直觉改）：
 
 | 文件 | 内容 |
 |---|---|
-| `docs/ARCHITECTURE.md` | 架构图、协议面、事件渲染表、平台约束 |
+| `docs/API-AND-SEQUENCE.md` | **接口清单 + 时序图**：能力域总览（42 文件 / 15.4k 行）、ACP 9 方法与 SDK 5 方法签名、内部模块导出符号表、6 张 mermaid 时序图（冷启动 / 一轮对话 / 审批 / 断线重连 / LAN 直连 / 语音降级）、文档缺口清单 |
+| `docs/ARCHITECTURE.md` | 架构图、协议面、事件渲染表、平台约束。**协议面已过时**（把 SDK 写成主路径，实际默认 ACP）——读协议请看 `API-AND-SEQUENCE.md` §2.1 与 `SPIKE-ACP.md` |
 | `docs/BOOT.md` | **启动链路走读**：点开图标 → EntryAbility → NodeHost.boot → dlopen/node::Start → bootstrap.cjs 十个垫片 → runCli/profile 挂载；含「哪些脚本在什么时候跑」的分类表与 6 个文件的阅读顺序 |
 | `docs/BUILD.md` | 构建、签名、装机、排障（含受限环境坑） |
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
