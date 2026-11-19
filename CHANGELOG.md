@@ -7,6 +7,23 @@
 
 ### 新增
 
+- **星闪与数据代理：从「说了没有」改成「真的试一次」**。设置 ›「互联」里多了两个按钮，
+  点下去会真的调 API，把返回码原样打出来——因为 `canIUse` 回答的是「系统声明了这项能力」，
+  和「这个应用能不能打开它」是两个问题，只有调一次才分得清。
+  `probeNearLink()` 走 `@kit.NearLinkKit` 的 `dataTransfer.createPort/destroyPort`（不配对、不扫描）；
+  `probeDataShare()` 走 `@kit.ArkData` 的 `dataShare.createDataProxyHandle()` 读自己的共享配置。
+  两条都不写数据、不改设置。**`ACCESS_NEARLINK` 是 user_grant/normal**，所以这条通道对三方应用是开着的。
+
+### 修复
+
+- **升级到 0.2.2 后应用起不来（严重）**：`dsh-credentials-local` 自己写的 `.credentials.yaml`
+  落盘是 644，而它下次启动时 `assertOwnerOnly` 直接拒绝，报
+  `startup failed: 1 required plugin did not activate`（失败插件 credentials），
+  于是每次启动都失败。`bootstrap.cjs` 的 `tightenKeyFile()` 原来只收 `.api-key`，
+  现在把 `.credentials.yaml` 一起收到 0600，并在收紧时打印原 mode。
+  **契约**：ArkTS 侧没有 chmod API，所以这个窗口只能在 Node 起来后关——这也意味着
+  **第一次运行仍会留下 644 的文件**，靠下一次启动修好。
+
 - **互联（第一批）：同一 WiFi 直连 + 中继 + 剪贴板**。`common/Interop.ets` 定义统一信封
   `{v,id,from,at,text}`（换行分帧，和 ACP 桥同一套约定）与三条通道；`view/InteropSheet.ets`
   挂在 设置 ›「互联」展开：显示本机地址、开房间、加入对方地址、连中继、发消息、消息日志，

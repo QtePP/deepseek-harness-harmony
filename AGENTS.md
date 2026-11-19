@@ -301,6 +301,13 @@ ACP 实测契约（勿凭直觉改）：
   没有证据。**契约**：`llm-pi-ai` 由 dsh-base 挂载但空转（`providers` 为空则零路由），
   block 里 `api: openai-completions` 是本地服务通用协议；`apiKeyEnv` **不要写**——环回服务不鉴权，
   编一个运行期读不到的 env 名反而会让路由校验失败。
+  **`.credentials.yaml` 权限导致启动失败（2026-11-19 真机发现，严重）**：升级到 0.2.2 后
+  `dsh-credentials-local` 载入时 `assertOwnerOnly` 拒绝 644 的文件，报
+  `dsh: startup failed: 1 required plugin did not activate` / `Failed plugins (1): credentials`，
+  于是**每次启动都失败**。根因是它自己首次写盘用的默认 mode 644。
+  修法：`bootstrap.cjs` 的 `tightenKeyFile()` 从只收 `.api-key` 扩展到同时收 `.credentials.yaml`
+  并打印原 mode。**契约**：ArkTS 没有 chmod API，这个窗口只能在 Node 起来后关，
+  所以**首次运行仍会留下 644**，靠下一次启动修好；hdc 侧也 chmod 不了（`Operation not permitted`）。
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。

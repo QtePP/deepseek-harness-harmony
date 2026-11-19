@@ -19,6 +19,16 @@
         "name": "ohos.permission.GET_NETWORK_INFO"
       },
       {
+        "name": "ohos.permission.ACCESS_NEARLINK",
+        "reason": "$string:nearlink_perm_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
         "name": "ohos.permission.MICROPHONE",
         "reason": "$string:mic_perm_reason",
         "usedScene": {

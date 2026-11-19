@@ -1,5 +1,6 @@
-import { ChannelStatus, ChannelKind, ClipboardChannel, InteropEnvelope, LanChannel, WebSocketChannel,
-  INTEROP_PORT, localLanAddress, localPeerName, makeEnvelope, probeChannels } from '../common/Interop'
+import { ChannelStatus, ChannelKind, ClipboardChannel, InteropEnvelope, LanChannel, ProbeResult,
+  WebSocketChannel, INTEROP_PORT, localLanAddress, localPeerName, makeEnvelope, probeChannels,
+  probeNearLink, probeDataShare } from '../common/Interop'
 
 /**
  * The interop panel: what this device can talk to, and one working channel.
@@ -21,6 +22,9 @@ export struct InteropSheet {
   @State busy: boolean = false
   @State hint: string = ''
   @State relayUrl: string = ''
+  @State nearLinkResult: ProbeResult | null = null
+  @State dataShareResult: ProbeResult | null = null
+  @State probing: string = ''
   private lan: LanChannel | null = null
   private ws: WebSocketChannel | null = null
   private me: string = localPeerName()
@@ -326,7 +330,68 @@ export struct InteropSheet {
       .backgroundColor($r('app.color.surface_muted'))
       .borderRadius(10)
 
-      Text('蓝牙 / 星闪 / 同账号设备这三条要双方都装本应用，且各自需要额外授权或系统支持；先把接口和能力查询放好，等真有场景再开。')
+      // 实测：canIUse 说「系统声明了这项能力」，不等于「这个应用真能打开它」。
+      // 唯一诚实的分辨办法是真的调一次，把返回码原样说出来。
+      Column({ space: 6 }) {
+        Text('实测两条「说了没有」的通道')
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+        Row({ space: 8 }) {
+          Button(this.probing === 'nearlink' ? '试星闪…' : '试星闪')
+            .fontSize(12)
+            .height(30)
+            .layoutWeight(1)
+            .backgroundColor($r('app.color.surface'))
+            .fontColor($r('app.color.text_primary'))
+            .enabled(this.probing.length === 0)
+            .onClick(() => {
+              this.probing = 'nearlink'
+              void probeNearLink().then((result: ProbeResult) => {
+                this.nearLinkResult = result
+                this.probing = ''
+              })
+            })
+          Button(this.probing === 'datashare' ? '试数据代理…' : '试数据代理')
+            .fontSize(12)
+            .height(30)
+            .layoutWeight(1)
+            .backgroundColor($r('app.color.surface'))
+            .fontColor($r('app.color.text_primary'))
+            .enabled(this.probing.length === 0)
+            .onClick(() => {
+              this.probing = 'datashare'
+              void probeDataShare('com.qtepp.taharness').then((result: ProbeResult) => {
+                this.dataShareResult = result
+                this.probing = ''
+              })
+            })
+        }
+        .width('100%')
+
+        if (this.nearLinkResult !== null) {
+          Text(`星闪：${(this.nearLinkResult as ProbeResult).ok ? '可用' : '不可用'} — ${(this.nearLinkResult as ProbeResult).detail}`)
+            .fontSize(11)
+            .fontColor((this.nearLinkResult as ProbeResult).ok ? '#3FBF74' : $r('app.color.text_tertiary'))
+            .width('100%')
+        }
+        if (this.dataShareResult !== null) {
+          Text(`数据代理：${(this.dataShareResult as ProbeResult).ok ? '可用' : '不可用'} — ${(this.dataShareResult as ProbeResult).detail}`)
+            .fontSize(11)
+            .fontColor((this.dataShareResult as ProbeResult).ok ? '#3FBF74' : $r('app.color.text_tertiary'))
+            .width('100%')
+        }
+        Text('星闪只建端口不配对；数据代理只读我们自己的共享配置。两条都不写数据、不改设置。')
+          .fontSize(10)
+          .fontColor($r('app.color.text_tertiary'))
+          .width('100%')
+      }
+      .width('100%')
+      .padding(10)
+      .backgroundColor($r('app.color.surface_muted'))
+      .borderRadius(10)
+
+      Text('蓝牙要双方都装本应用并配对，比 WiFi 直连没有任何优势；等有明确场景再做。')
         .fontSize(10)
         .fontColor($r('app.color.text_tertiary'))
         .width('100%')

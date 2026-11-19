@@ -96,22 +96,37 @@ function keyFilePath() {
 }
 
 /**
- * Tighten the credential file as early as possible. The host cannot chmod
- * (@ohos.file.fs has no permission API), so the file briefly lands with the
+ * Tighten credential files as early as possible. The host cannot chmod
+ * (@ohos.file.fs has no permission API), so the files briefly land with the
  * default creation mode inside the app sandbox; per-uid isolation covers
  * that window, and 0600 from here on also keeps the debug chmod timer and
  * shell-side reads out.
+ *
+ * Two files, not one. `.api-key` is ours. `.credentials.yaml` is written by
+ * dsh-credentials-local itself, and from 0.2.2 that provider calls
+ * assertOwnerOnly() on load and refuses to start when the file is 644 — so a
+ * fresh install reached "startup failed: 1 required plugin did not activate"
+ * with credentials as the culprit, and every later launch repeated it. The
+ * window that produces the bad mode is the first run; tightening on every
+ * boot closes it without touching what the file contains.
  */
 function tightenKeyFile() {
-  const keyFile = keyFilePath()
-  if (!keyFile) return
-  try {
-    if (fs.existsSync(keyFile)) {
-      fs.chmodSync(keyFile, 0o600)
-      log('key: file tightened to 0600')
+  const home = process.env.DSH_HOME || ''
+  const candidates = [keyFilePath()]
+  if (home) candidates.push(path.join(home, '.credentials.yaml'))
+  for (const file of candidates) {
+    if (!file) continue
+    try {
+      if (fs.existsSync(file)) {
+        const mode = fs.statSync(file).mode & 0o777
+        if (mode !== 0o600) {
+          fs.chmodSync(file, 0o600)
+          log(`key: ${path.basename(file)} tightened to 0600 (was ${mode.toString(8)})`)
+        }
+      }
+    } catch {
+      /* best effort */
     }
-  } catch {
-    /* best effort */
   }
 }
 

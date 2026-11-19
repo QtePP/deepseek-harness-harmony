@@ -4,6 +4,8 @@ import { connection } from '@kit.NetworkKit'
 import { webSocket } from '@kit.NetworkKit'
 import { util } from '@kit.ArkTS'
 import deviceInfo from '@ohos.deviceInfo'
+import { dataShare } from '@kit.ArkData'
+import { dataTransfer } from '@kit.NearLinkKit'
 
 /**
  * Interop: talking to something that is not this app's own runtime.
@@ -384,6 +386,70 @@ export class ClipboardChannel {
   static async paste(): Promise<string> {
     const data = await pasteboard.getSystemPasteboard().getData()
     return data.getPrimaryText()
+  }
+}
+
+/**
+ * Result of actually trying a channel, not of asking whether it should work.
+ *
+ * This exists because canIUse answers "does the system advertise the
+ * capability", which is a different question from "can this app open it". The
+ * only honest way to tell them apart is to make the call and report the code.
+ */
+export interface ProbeResult {
+  kind: ChannelKind
+  ok: boolean
+  detail: string
+}
+
+/**
+ * Try 星闪 for real: create a port, then tear it down.
+ *
+ * A port is the cheap half of the API — no pairing, no peer, no scanning. If
+ * even that fails, the rest of the chain is moot, and we learn it in one call.
+ */
+export async function probeNearLink(): Promise<ProbeResult> {
+  if (!canIUse('SystemCapability.Communication.NearLink.Core')) {
+    return { kind: ChannelKind.NEARLINK, ok: false, detail: '本机没有星闪 syscap' }
+  }
+  try {
+    // A fixed UUID identifies our service on the star-flash link; the same
+    // string must be used by the peer, so it is a constant, not a random id.
+    dataTransfer.createPort(NEARLINK_SERVICE_UUID)
+    dataTransfer.destroyPort(NEARLINK_SERVICE_UUID)
+    return { kind: ChannelKind.NEARLINK, ok: true, detail: '端口创建成功（可继续做配对与传输）' }
+  } catch (error) {
+    const err = error as Record<string, Object>
+    const code = err.code === undefined ? '' : ` ${err.code}`
+    const message = err.message === undefined ? '未知错误' : err.message as string
+    return { kind: ChannelKind.NEARLINK, ok: false, detail: `createPort 失败${code}：${message}` }
+  }
+}
+
+/** Fixed service identity for the 星闪 port channel. */
+export const NEARLINK_SERVICE_UUID: string = '6E6561724C696E6B0000000000453931'
+
+/**
+ * Try DataShare for real: open the proxy handle our own bundle publishes to.
+ *
+ * The failure here is expected to be honest and specific — "no publisher" is a
+ * different answer from "denied", and only the call can tell us which.
+ */
+export async function probeDataShare(bundleName: string): Promise<ProbeResult> {
+  try {
+    const handle = await dataShare.createDataProxyHandle()
+    const uri = `datashare:///${bundleName}/interop`
+    const values = await handle.getValues(uri, { type: dataShare.DataProxyType.SHARED_CONFIG })
+    return {
+      kind: ChannelKind.CLIPBOARD,
+      ok: true,
+      detail: `数据代理可用，读到 ${values.length} 个值`
+    }
+  } catch (error) {
+    const err = error as Record<string, Object>
+    const code = err.code === undefined ? '' : ` ${err.code}`
+    const message = err.message === undefined ? '未知错误' : err.message as string
+    return { kind: ChannelKind.CLIPBOARD, ok: false, detail: `数据代理不可用${code}：${message}` }
   }
 }
 

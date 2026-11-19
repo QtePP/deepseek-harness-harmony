@@ -19,6 +19,10 @@
     {
       "name": "dir_grant_perm_reason",
       "value": "用于记住你授权的项目目录，重启应用后自动恢复访问"
+    },
+    {
+      "name": "nearlink_perm_reason",
+      "value": "与附近的星闪设备建立互联通道"
     }
   ]
 }
