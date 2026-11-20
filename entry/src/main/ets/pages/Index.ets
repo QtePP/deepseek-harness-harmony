@@ -152,6 +152,9 @@ struct Index {
   @State showModelSheet: boolean = false
   @State modelChoices: AcpModelChoice[] = []
   @State approvalVisible: boolean = false
+  /** First-launch mode question: shown once, before the runtime boots. */
+  @State firstRunVisible: boolean = false
+  private firstRunResolve: (() => void) | null = null
   @State approvalText: string = ''
   /** Share prefill landing in the composer (absorbed once by ChatView). */
   @State shareText: string = ''
@@ -310,12 +313,47 @@ struct Index {
     this.host.acp.onDisconnect = (reason: string) => {
       this.handleAcpDisconnect(reason)
     }
+    await this.maybeAskFirstRun()
     await this.boot()
     // ACP session ids come from the server: a fresh app start with no
     // persisted conversation opens one immediately so the first prompt and
     // the model picker have a live session to target.
     await this.ensureAcpCurrentSession()
     this.onShortcutRequest()
+  }
+
+  /**
+   * Ask once which mode to run in, before the runtime is dispatched.
+   *
+   * The SDK profile is the shipped default but it is the degraded one: no ohos
+   * profile means `glob`/`grep` fall back to spawning ripgrep, which can never
+   * run here, plus no streaming and no approval channel. Rather than flip the
+   * default (which would orphan conversations: ACP session ids come from the
+   * server and do not resolve against SDK ones), the first launch asks, and
+   * the answer decides *this* boot — no restart needed.
+   */
+  private maybeAskFirstRun(): Promise<void> {
+    if (AppConfig.profilePrompted) {
+      return Promise.resolve()
+    }
+    this.firstRunVisible = true
+    return new Promise<void>((resolve) => {
+      this.firstRunResolve = resolve
+    })
+  }
+
+  /** Persist the first-launch answer and let init() continue to boot(). */
+  private chooseFirstRun(profile: string): void {
+    const context = this.context
+    this.firstRunVisible = false
+    const resolve = this.firstRunResolve
+    this.firstRunResolve = null
+    if (context !== null) {
+      void AppConfig.saveInitialProfile(context, profile)
+    }
+    if (resolve !== null) {
+      resolve()
+    }
   }
 
   /**
@@ -2815,6 +2853,42 @@ struct Index {
           .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)', offsetY: 8 })
           .onClick(() => {
           })
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor('rgba(0,0,0,0.4)')
+      }
+
+      if (this.firstRunVisible) {
+        Column() {
+          Column({ space: 12 }) {
+            Text('选择运行模式')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+            Text('ACP 有流式回答、工具审批、纯 JS 搜索与密钥热更新；SDK 是兼容模式，搜索工具在设备上不可用。')
+              .fontSize(14)
+              .fontColor($r('app.color.text_secondary'))
+            Text('随时可在「设置 › 协议」里切换；之后切换需重启应用生效。')
+              .fontSize(11)
+              .fontColor($r('app.color.text_tertiary'))
+            Button('用 ACP（推荐）')
+              .width('100%')
+              .onClick(() => this.chooseFirstRun(AppConfig.PROFILE_ACP))
+            Button('用 SDK')
+              .width('100%')
+              .backgroundColor($r('app.color.surface_muted'))
+              .fontColor($r('app.color.text_primary'))
+              .onClick(() => this.chooseFirstRun(AppConfig.PROFILE_SDK))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .padding(20)
+          .width('86%')
+          .constraintSize({ maxWidth: 460 })
+          .borderRadius(16)
+          .backgroundColor($r('app.color.background'))
+          .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)', offsetY: 8 })
         }
         .width('100%')
         .height('100%')

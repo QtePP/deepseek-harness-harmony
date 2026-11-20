@@ -135,7 +135,8 @@ FormData` 是必须的——dsh 启动期会读全局 `Headers`，只换 `fetch`
 
 > **这是当前最重要的一条架构事实**：默认 `sdk` 是**兼容历史的降级路径**——它不挂 ohos 插件，
 > 所以 `glob`/`grep` 会走 spawn ripgrep（必失败）、改密钥要重启、没有工具表自检、模型不知道「今天」。
-> 完整能力必须切 ACP 并重启。见 §7。
+> **首次启动会问一次用哪个**（`Index.maybeAskFirstRun` → `AppConfig.saveInitialProfile`），
+> 答案决定当次启动、不需要重启；之后在「设置 › 协议」切换才需要重启。见 §7。
 
 ### 4.3 契约摘要（细节见 [`SPIKE-ACP.md`](SPIKE-ACP.md) 与 AGENTS.md §4）
 
@@ -206,9 +207,11 @@ Seatbelt / Windows ACL，**每一个都要 spawn**。这也和「bash 整族被�
 
 ## 7. 已知边界（诚实清单）
 
-- **默认 profile 是 `sdk`，而它是降级路径**：不挂 ohos 插件 ⇒ `glob`/`grep` 走 spawn ripgrep（失败）、
+- **默认 profile 仍是 `sdk`，而它是降级路径**：不挂 ohos 插件 ⇒ `glob`/`grep` 走 spawn ripgrep（失败）、
   密钥改动要重启、无 boot-report、无 `time-context`（模型不知道「今天」）、无流式、无审批通道。
-  切到 ACP 才有完整能力，代价是重启 App。**这是一个待决策的产品问题，不是 bug**。
+  **已加首启引导**（2026-11-20）：第一次启动弹一次「用 ACP（推荐）/ 用 SDK」，答案决定当次启动；
+  没有直接翻默认值，是因为 ACP 的 sessionId 由服务端生成、与 SDK 的不通用——全量切换会让老会话的
+  上下文失效。老用户保持原选择，可在设置里自己切（切后需重启）。
 - **无 token 级流式（SDK 路径）**：SDK 只在一步结束时发 `assistant/message`；ACP 有 chunk 级流式。
 - **工具面受平台限制**：没有 `git` / `rg` / `bash` 二进制；`bash`、`job_*`、`pwsh` 整族已从模型工具表移除
   （让工具「不存在」比让它「失败」更好）。

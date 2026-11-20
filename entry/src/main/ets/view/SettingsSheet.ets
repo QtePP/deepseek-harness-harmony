@@ -421,9 +421,9 @@ export struct SettingsSheet {
         .width('100%')
 
         Column({ space: 6 }) {
-          Text('对话协议（实验）').fontSize(12).fontColor($r('app.color.text_secondary'))
+          Text('对话协议（首次启动时会问一次）').fontSize(12).fontColor($r('app.color.text_secondary'))
           Row({ space: 8 }) {
-            Button('SDK（默认）')
+            Button('SDK（兼容）')
               .layoutWeight(1)
               .fontSize(13)
               .backgroundColor(this.profile === 'sdk' ? this.accent : $r('app.color.surface_muted'))
@@ -487,7 +487,7 @@ export struct SettingsSheet {
             .fontSize(11)
             .fontColor($r('app.color.text_tertiary'))
 
-          Text('协议与权限档位由启动期环境变量决定：切换后需彻底退出并重新打开应用才会生效（Node 每进程仅启动一次）；档位在会话创建时固化，重启后仅新会话生效。ACP 会话的服务端 id 与 SDK 会话互不通用。')
+          Text('协议与权限档位由启动期环境变量决定：切换后需彻底退出并重新打开应用才会生效（Node 每进程仅启动一次）；档位在会话创建时固化，重启后仅新会话生效。ACP 会话的服务端 id 与 SDK 会话互不通用。SDK 是兼容模式：不挂 ohos 插件，设备上搜索工具不可用。')
             .fontSize(11)
             .fontColor($r('app.color.text_tertiary'))
         }

@@ -47,8 +47,17 @@ export class AppConfig {
   static appearance: string = AppConfig.APPEARANCE_SYSTEM
   /** Transcript text size id; the multiplier lives in AppStorage for the views. */
   static fontLevelId: string = 'standard'
-  /** dsh profile for the next boot; SDK stays the default, ACP is opt-in. */
+  /**
+   * dsh profile for the next boot.
+   *
+   * SDK stays the shipped default because it is the path that never needs a
+   * restart to be understood, but it is the degraded one (no ohos profile, so
+   * no pure-JS search, no streaming, no approvals). First launch therefore
+   * asks once — see `profilePrompted` — and the answer is written here.
+   */
   static profile: string = AppConfig.PROFILE_SDK
+  /** Whether the first-launch mode question has been answered. */
+  static profilePrompted: boolean = false
   /** Approval tier surfaced to bootstrap as DSH_PERMISSION_MODE. */
   static permissionMode: string = AppConfig.PERMISSION_WORKSPACE
   private static store: preferences.Preferences | null = null
@@ -58,12 +67,14 @@ export class AppConfig {
     const saved = await AppConfig.store.get('api_key', '') as string
     const model = await AppConfig.store.get('model', AppConfig.MODEL) as string
     const profile = await AppConfig.store.get('profile', AppConfig.PROFILE_SDK) as string
+    const prompted = await AppConfig.store.get('profile_prompted', false) as boolean
     const permission = await AppConfig.store.get('permission_mode', AppConfig.PERMISSION_WORKSPACE) as string
     const accent = await AppConfig.store.get('accent', 'blue') as string
     const appearance = await AppConfig.store.get('appearance', AppConfig.APPEARANCE_SYSTEM) as string
     const fontLevel = await AppConfig.store.get('font_level', 'standard') as string
     AppConfig.model = model.length === 0 ? AppConfig.MODEL : model
     AppConfig.profile = profile === AppConfig.PROFILE_ACP ? AppConfig.PROFILE_ACP : AppConfig.PROFILE_SDK
+    AppConfig.profilePrompted = prompted
     AppConfig.permissionMode = AppConfig.normalizePermissionMode(permission)
     AppConfig.accentId = themeIdOf(accentOf(accent))
     AppStorage.setOrCreate(ACCENT_KEY, accentOf(AppConfig.accentId))
@@ -245,6 +256,25 @@ export class AppConfig {
       AppConfig.store = await preferences.getPreferences(context, AppConfig.STORE)
     }
     await AppConfig.store.put('accent', AppConfig.accentId)
+    await AppConfig.store.flush()
+  }
+
+  /**
+   * Record the first-launch mode answer.
+   *
+   * Called before the runtime boots, so the chosen profile is what this very
+   * launch mounts — no restart involved. The marker keeps the question to
+   * exactly one appearance, including after the user later switches modes in
+   * Settings (that path goes through `saveRuntimeChoice`).
+   */
+  static async saveInitialProfile(context: common.UIAbilityContext, profile: string): Promise<void> {
+    AppConfig.profile = profile === AppConfig.PROFILE_ACP ? AppConfig.PROFILE_ACP : AppConfig.PROFILE_SDK
+    AppConfig.profilePrompted = true
+    if (AppConfig.store === null) {
+      AppConfig.store = await preferences.getPreferences(context, AppConfig.STORE)
+    }
+    await AppConfig.store.put('profile', AppConfig.profile)
+    await AppConfig.store.put('profile_prompted', true)
     await AppConfig.store.flush()
   }
 
