@@ -12,6 +12,29 @@
 
 ---
 
+- **`user_profile` 交付：跨会话画像第一次有了通道（2026-11-20 16:10，本地闭环，真机待验）**。
+  起点是一个问题：「切了对话，它还记得我吗」。答案原来是**不记得**——搜遍载荷，
+  `dsh-persona` 是部署方写死的 persona 前缀、`dsh-personalized-recommendations` 推的是插件卡片，
+  **没有任何插件写用户画像**；唯一跨会话的通道是 `dsh-agent-instructions`。
+  **先取证再写代码**：直接 import 它的公开函数实测，没有靠 README 推断——
+  `discoverBaselineInstructionFiles({cwd, dshHome, agentsHome})` 返回
+  `$DSH_HOME/AGENTS.md` → `AGENTS.md` → `AGENTS.local.md`，`loadBaselineInstructions` 渲染出的
+  `<system-reminder>` 里**三个文件的正文原样都在**；补测确认**没有 `.git` 目录也能找到项目根**
+  （`findProjectRoot` 一路失败就返回 cwd），也就是工作区里放一份 `AGENTS.md` 就够。
+  这也推翻了一个容易想当然的前提：指令文件不是「模型要主动去读」，是**每次会话第一条请求前系统自动拼进上下文**。
+  实现 `@ohos/dsh-tool-user-profile`：写 `<DSH_HOME>/AGENTS.md` 里一个**受管区块**
+  （`<!-- dsh:user-profile:begin/end -->`），区块外的用户 prose 一字不动；四个动作
+  `add`/`replace`/`forget`/`list`；**每条带学习日期**（`- 2026-11-20 — …`），因为画像会漂移，
+  日期让「哪条过期」可见，`replace` 是显式取代而不是两条并存。硬约束：80 条上限、单条 400 字符、
+  受管区块 12KB（超了**拒写**不是静默截断）、stage+rename 原子替换、`fileName` 绝对路径直接拒
+  （`join` 会把 `/etc/passwd` 悄悄折成 `<home>/etc/passwd`，第一版就是这么漏的，单测抓到）。
+  验证：单测 **26/26**（含 `--jitless`）、`bash scripts/test.sh unit` 六套全绿（38/22/8/20/38/26）、
+  `--dump-config` 新行命中、冒烟 `tools(27)` 里出现 `user_profile`；端到端再走一遍
+  **写 → 下一轮上下文读到**（用户自己的「回答用中文」与新写的两条画像同时在），日期串也在。
+  **真机未验**：装后需要确认一次「新会话开口就知道画像」这条。
+
+---
+
 - **`git` 真机第四轮：暂存式 `force` 与自解析 `~N` 双双闭环（2026-11-20 15:44，MatePad Mini）**。
   部署带「先克隆到临时目录再换入」+ `resolveRev` 的版本后，让模型按**失败路径优先**的顺序跑四步，
   原始返回全部从 `session.v4.jsonl.zstd` 取出（不看模型复述）：

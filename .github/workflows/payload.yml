@@ -75,7 +75,7 @@ jobs:
         run: |
           DSH_HOME=.build/ci-home node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js \
             --profile ohos --patch .build/payload/patches/ohos.patch.yml --dump-config > /tmp/dump.txt
-          for row in boot-report-ohos credentials-live-ohos ptc-runtime-vm tool-fs-search-ohos time-context; do
+          for row in boot-report-ohos credentials-live-ohos ptc-runtime-vm tool-fs-search-ohos time-context tool-git tool-user-profile; do
             grep -q "id: $row" /tmp/dump.txt || { echo "row missing: $row"; exit 1; }
           done
           for row in tool-bash tool-jobs tool-fs-search ptc-runtime; do
