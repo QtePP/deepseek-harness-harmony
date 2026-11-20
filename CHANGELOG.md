@@ -7,6 +7,11 @@
 
 ### 新增
 
+- **`git` 的 `force` 与 `HEAD~1` 已真机验成（失败路径优先）**：`snapshot`（2.0 MB / 8.7s）→
+  `clone` 一个不存在的仓库 `force=true`（传输失败）→ `status` 仍报 `clean (164 paths)`（快照没被动）→
+  `clone force=true`（4.4 MB / 13.0s）→ `diff` 不传 `base`/`head` 得到 `4 paths changed in
+  HEAD~1..HEAD`。设备 `repos/` 无 `.incoming` 残留、无 `.git/shallow`。
+
 - **`force` 删了才克隆，一次超时就把唯一副本弄没了（真机发现，严重）**：第一版 `force` 是「先删、
   再 clone」。平板上一跑，GitHub 超时，仓库从 `repos/` 里**彻底消失**，随后的 `log`/`diff` 只能报
   「not cloned yet」。现改为**先克隆到同级临时目录 `.qtepp-<slug>.incoming`，成功后才删旧的再

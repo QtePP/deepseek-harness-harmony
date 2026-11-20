@@ -12,6 +12,20 @@
 
 ---
 
+- **`git` 真机第四轮：暂存式 `force` 与自解析 `~N` 双双闭环（2026-11-20 15:44，MatePad Mini）**。
+  部署带「先克隆到临时目录再换入」+ `resolveRev` 的版本后，让模型按**失败路径优先**的顺序跑四步，
+  原始返回全部从 `session.v4.jsonl.zstd` 取出（不看模型复述）：
+  ①`snapshot qtepp/deepseek-harness-harmony` → `snapshot … (2.0 MB, 8.7s)`，8.7s 一次成功；
+  ②`clone qtepp/no-such-repo-zzz-999 force=true` → 传输失败（`HTTP Error: 401 Unauthorized`，
+  不存在的仓库被 GitHub 这样回），**关键在于第 ③ 步**；
+  ③`status qtepp/deepseek-harness-harmony` → **`clean (164 paths)`**——证明 ② 的失败**没有动到**
+  ①的快照。上一版正是在这里把仓库弄丢的；
+  ④`clone … force=true` → `cloned … (4.4 MB, 13.0s)`，随后 `diff`（**不传 base/head**）→
+  **`4 paths changed in HEAD~1..HEAD`** 并列出四条真实路径。设备侧核对：`repos/` 下只有正式目录、
+  **没有 `.incoming` 残留**，`.git/shallow` 已不存在（全量历史）。
+  **这一轮把三个此前只有本地证据的东西搬到了真机**：`force` 的失败安全性、`force` 的成功换入、
+  以及 `HEAD~1` 在真机上的解析（js-git 自己不会）。
+
 - **`git` 真机第三轮：`force` 把仓库弄丢了（2026-11-20 15:35–15:37，MatePad Mini）**。部署带
   `force` + `resolveRev` 的版本后，让模型走 `clone force=true → diff → log`。剧情是坏的：
   **第一次 `clone force=true` 撞上 `request to github.com timed out`**，而第一版 `force` 的实现是
