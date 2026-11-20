@@ -70,7 +70,9 @@ function prepareStaging() {
     name: 'dsh-ohos-payload',
     private: true,
     type: 'commonjs',
-    dependencies: { '@deepseek-ai/dsh': dshVersion }
+    // isomorphic-git backs @ohos/dsh-tool-git: pure JS, no WASM, pinned because
+    // the tool's error handling was measured against this major.
+    dependencies: { '@deepseek-ai/dsh': dshVersion, 'isomorphic-git': '1.44.17' }
   }, null, 2))
 
   // --ignore-scripts is required: koffi (a regular dsh dependency) runs a

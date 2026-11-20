@@ -78,7 +78,7 @@ dsh 启动期会读全局 `Headers`，一读就触发 undici 的惰性物化，�
 - 插件包必须写进 **bundle 的 `dependencies`**——profile 路由表按 bundle 依赖闭包构建，文件在 `node_modules` 里也没用；
 - 载荷里残留的同名 `@ohos/*` 测试包会**遮蔽** profile 内的新版（曾制造「patch not found」假象）。
 
-价值不在「我们装上了插件」，而在**「不 fork dsh 也能给平台加能力」这条路被证明了**。现在五个插件都挂在这条路上：纯 JS 搜索、in-process PTC、密钥热更新、时间上下文、boot 自检。
+价值不在「我们装上了插件」，而在**「不 fork dsh 也能给平台加能力」这条路被证明了**。现在六个插件都挂在这条路上：纯 JS 搜索、in-process PTC、密钥热更新、时间上下文、boot 自检，以及纯 JS 的 `git`。
 
 ### 1.5 三条降级链：每条都只在真机上暴露
 
@@ -115,7 +115,7 @@ dsh 启动期会读全局 `Headers`，一读就触发 undici 的惰性物化，�
 | 3 jitless fetch | 启动即 `boot: sdk runtime mounted`，0 fatal | `host/fetch-shim.cjs`、`host/undici-hooks.mjs` |
 | 4 自定义 profile | `--dump-config` 行命中；真机工具表含 `glob`/`grep` 且无 `bash` | `host/profile-ohos/…/@ohos/dsh-bundle-ohos/cordis.patch.yml` |
 | 5 三条降级链 | 会话写得进、图片不再报错、用户目录可写 | `host/bootstrap.cjs` 的 `install*Fallback` |
-| 6 可观测性 | `[boot-report] tools(25): …` / `web: search=…` | `host/profile-ohos/…/@ohos/dsh-boot-report` |
+| 6 可观测性 | `[boot-report] tools(26): …` / `web: search=…` | `host/profile-ohos/…/@ohos/dsh-boot-report` |
 
 ---
 

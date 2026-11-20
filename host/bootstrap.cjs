@@ -287,6 +287,10 @@ async function boot() {
 
   process.env.DSH_HOME = DSH_HOME
   process.env.DSH_NO_OPEN = '1'
+  // Profile-scope plugins live under $DSH_HOME/profiles and cannot resolve
+  // packages that only exist in the payload tree (isomorphic-git, for the git
+  // tool). Export the root so they can import by absolute path.
+  process.env.DSH_PAYLOAD_ROOT = PAYLOAD_ROOT
 
   // The native bridge dumps the child environment into node.log at start
   // (`[node_bridge] env DEEPSEEK_API_KEY=…`), so the key is handed over as a

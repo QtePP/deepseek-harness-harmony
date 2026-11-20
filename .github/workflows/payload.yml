@@ -54,9 +54,9 @@ jobs:
       - name: Stage the payload tree
         run: node scripts/assemble-payload.mjs --skip-pack
 
-      # Four suites: 38 (pure-JS search) / 22 (ptc runtime) / 8 (credentials
-      # live) / 20 (boot report). The ptc suite also runs under --jitless,
-      # because that is the only execution mode the phone has.
+      # Five suites: 38 (pure-JS search) / 22 (ptc runtime) / 8 (credentials
+      # live) / 20 (boot report) / 20 (git). The ptc suite also runs under
+      # --jitless, because that is the only execution mode the phone has.
       - name: Run the plugin suites
         run: bash scripts/test.sh unit
 
