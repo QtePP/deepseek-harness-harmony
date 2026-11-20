@@ -312,6 +312,22 @@ ACP 实测契约（勿凭直觉改）：
   **通知未验成**：设备 `allowEnableNotification=false`，`requestEnableNotification` 既不弹框
   也不改状态，需在 系统设置 › 通知 › TA Harness 手动打开后再验。真机暴露并修掉的 4 个缺陷见
   `CHANGELOG.md`（手机端回调缺失、`@` 缓存键、重答标题/多余提示、通知授权时机）。
+- **0.2.2-rc.5 + 首启引导已真机闭环（2026-11-20，手机）**：装机后首启弹出「选择运行模式」，
+  点「用 ACP」→ **同一次启动**即以 `--profile ohos` 挂载（`bridge-status.json` 的
+  `profile: ohos`、`node: v24.2.0`、`wasm: false`），**不需要重启**——提问发生在 `boot()` 之前。
+  `bridge.log` 两条关键行与本地一致：`tools(25)` 与
+  `web: search=auto (deepseek-official for deepseek-official)`（不再误报 ambiguous）。
+  **真实一轮搜索跑通**：`web_search`×4 + `web_fetch`×1，模型给出带来源的一句话结论；会话日志里
+  `web/deepseek-search-llm-request` **出现 10 次**、端点是 `https://api.deepseek.com/anthropic/v1/messages`
+  ——证明 rc.5 的**服务端 Messages 搜索**路径在设备上成立（旧 Search API 不会追加该事件），
+  且 fetch-shim 扛得住这个新请求形态。同轮快照：`sandbox/mode=workspace-write`、`approval/policy=ask`。
+  **装机坑（新设备必踩）**：`build-profile.signing.json5` 里的 DevEco 加密密码会与
+  `~/.ohos/config/` 下的 `.p12` 失配（报 `11014003 Init keystore failed / keystore password was
+  incorrect`）。修法是 `devecocli signature generate --force` 重新生成，然后把新的
+  `build-profile.json5` 覆盖到 `build-profile.signing.json5` 备份、再 `git checkout
+  build-profile.json5`。注意它复用了同一组文件名（哈希后缀相同）——**覆盖的是内容**，这正是旧
+  备份密文对不上的原因。
+
 - **官方 dsh 上游已核对（2026-11-15）**：`deepseek-ai/deepseek-harness` master `39163dd3`
   = `dsh` **0.2.2-rc.3**，我们载荷钉的是 0.2.1-rc.4。**ACP 协议面没变**（9 方法 +
   `$/cancel_request`、5 种 `session/update`、`session/request_permission`），客户端无需改动。
