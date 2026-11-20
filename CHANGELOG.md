@@ -12,6 +12,17 @@
   `clone force=true`（4.4 MB / 13.0s）→ `diff` 不传 `base`/`head` 得到 `4 paths changed in
   HEAD~1..HEAD`。设备 `repos/` 无 `.incoming` 残留、无 `.git/shallow`。
 
+- **`git` 新增 `commit` 与 `push`（八个动作）**：此前只能读，模型改了 `repos/<slug>` 里的文件也存不进去。
+  现在 `commit` 走 `statusMatrix` → `add`/`remove` → `commit`（删除要 `remove` 而不是 `add`，
+  否则只提交索引里的旧状态）；`push` 走 `git.push` + `onAuth`/`onAuthFailure`。
+  **两条安全口径**：①`commit` 只暂存**仓库内**路径，`guardPaths` 拒绝 `..`、绝对路径、`a/../../b`
+  ——`write`/`edit` 能写到工作区任意地方，这是唯一栅栏；②token 只从 `<dsh-home>/.git-token`
+  （或已有的 `.api-key`）读，**绝不进 env**——`node-bridge` 会把 env dump 进 `node.log`。
+  无 token 时先报 `GIT_NO_TOKEN` 并说明该放哪个文件，而不是等 GitHub 回一个裸 403。
+  实测（真实 clone + 真实 js-git，`--jitless`）：改文件 + 新增文件 → `commit` → 工作树 clean、
+  日志 2 条；删文件 → `commit` → 同样 clean；三条越界路径全部 `GIT_BAD_PATH`；嵌套路径放行。
+  单测 38 → **43**。
+
 - **`git` 跟随设备的系统代理（不再假设能直连 GitHub）**：平板上确实能直连（`github.com` →
   `20.247.166.64`，92–182ms），但这不是保证——同一天就撞过两次超时。而 HarmonyOS 只把系统代理暴露
   给 ArkTS（`connection.getDefaultHttpProxy()`），Node 完全不知道它存在，`http.js` 也不认代理，于是
