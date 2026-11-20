@@ -7,6 +7,12 @@
 
 ### 新增
 
+- **验收日志独立成 `docs/STATUS.md`**：`AGENTS.md` §7 长出 37KB 的逐条验收记录后，整份文件
+  超过了 agent 指令预算（65536 B），加载时尾部被截断——也就是说「Skill 路由」那一节读不到。
+  把**证据日志**（哪台设备、哪次构建、验了什么、代价多大、踩了什么坑）原文搬到 `docs/STATUS.md`，
+  §7 只留两张摘要表（现在跑通什么 / 卡在平台上的）+ 签名口径与已知边界等**规则**。
+  `AGENTS.md` 66KB → 35KB，规则与历史各归其位；新增验收记录写 STATUS，摘要同步改 §7。
+
 - **`git` 工具（纯 JS，真机闭环）**：`@ohos/dsh-tool-git` 用 isomorphic-git（pako 解析 packfile，
   **零 WASM**）把仓库经 HTTPS 落到 `repos/<slug>`，六个动作 `clone` / `snapshot` / `pull` / `log` /
   `diff` / `status`，之后交给 `glob` / `grep` / `read` 分析。工具表 25 → **26**。

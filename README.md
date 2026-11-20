@@ -245,6 +245,7 @@ scripts/               # 载荷装配、一键部署
 | 文档 | 内容 |
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
+| [STATUS.md](docs/STATUS.md) | 真机验收与状态日志：哪台设备、哪次构建、验了什么、踩了什么坑（时间倒序） |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构权威文本：进程剖面、双 profile 协议面、沙箱四层、平台约束（附排版版 [HTML](docs/on-device-architecture.html)） |
 | [BREAKTHROUGHS.md](docs/BREAKTHROUGHS.md) | 六件平台级突破与它们的代价（附排版版 [breakthroughs.html](docs/breakthroughs.html)） |
 | [BUILD.md](docs/BUILD.md) | 构建、签名、装机、排障 |
@@ -259,7 +260,7 @@ scripts/               # 载荷装配、一键部署
 诚实清单：
 
 - **无 token 级流式** —— 按块而非按 token 渲染
-- **无二进制工具面** —— 没有 `git` / `rg` / `bash`
+- **无二进制工具面** —— 没有 `rg` / `bash`；`git` 由纯 JS 插件 `@ohos/dsh-tool-git` 替代（`clone` / `snapshot` / `pull` / `log` / `diff` / `status`，落到 `repos/<slug>`）
 - **设备端不做图片降采样** —— 原尺寸上传，由服务端投影到视觉网格
 - **`run_code` 仅支持 JavaScript**，且当前默认未启用
 - **外部目录授权重启后需重新绑定**
