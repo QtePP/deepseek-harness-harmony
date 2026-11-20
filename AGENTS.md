@@ -168,6 +168,14 @@ ACP 实测契约（勿凭直觉改）：
   三个数字并存不是笔误；`scripts/*.sh` 没有钉 PATH，用的是调用者环境里的 node。
 - dsh **0.2.2-rc.5**（钉在 `scripts/assemble-payload.mjs` 的 `PINNED_DSH_VERSION`，**默认不再解析 `latest`**）；载荷 zip ≈**240MB**（剪掉 332MB 外国平台包后）；HAP ≈352MB（unsigned）；桥端口 4517。
 - `hdc` 不在 PATH：`/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc`。
+- **设备身份**：当前在用的是**平板** —— `const.product.name` = **HUAWEI MatePad Mini 悦读版**、
+  `const.product.model` = **MLR-AL00**、`const.product.devicetype` = **tablet**、API 26、2560×1600。
+  本文件个别旧记录把它写成「手机」，是笔误（当时没跑 `param get const.product.devicetype`）；
+  **凡是「手机」与这台设备同时出现的地方，以本条为准**。含义：它走 ≥840vp 的双栏布局，
+  单栏（手机）形态不在它身上验。另：`wm size` 在该设备 shell 里不可用（`inaccessible or not found`），
+  分辨率从 `param`/`hidumper` 取。
+- **序列号不进本仓库**（§8.5）：需要用序列号定位设备时记在本地记忆或命令行现场查
+  （`hdc list targets`），本文件只按「型号 + 形态」识别设备。
 - 设备侧文件路径两种视角同目录：hdc shell `/data/app/el2/100/base/<bundle>/haps/entry/files/…`
   ⇄ App 内 `/data/storage/el2/base/haps/entry/files/…`（`context.filesDir`）。
 
@@ -201,7 +209,8 @@ ACP 实测契约（勿凭直觉改）：
   `devecocli check arkts` 直接通过。**因此语音输入与朗读是 A 级（纯客户端可做），不是 C 级**，
   真机还需确认设备带 `SystemCapability.AI.SpeechRecognizer` / `SystemCapability.AI.TextToSpeech`。
   旧结论错在只看 `openharmony/ets/kits`，没看 `hms/ets/kits`。
-  **已实现并真机验（2026-11-16，手机 6MFGK26527000022）**：`common/Speech.ets` + `common/ReadAloud.ets`。
+  **已实现并真机验（2026-11-16，平板 MatePad Mini）**：`common/Speech.ets` + `common/ReadAloud.ets`。
+  （该设备当时记为「手机」，2026-11-20 查明是平板，见 §6 设备身份。）
   真机结论：**syscap 在、引擎起不来**——麦克风按钮渲染出来了（说明 `canIUse` 为真）、授权弹窗与
   我们写的理由串正常显示，但 `createEngine` 返回 **1002200001**（设备日志 `AI_COMMON:
   CreateEngineErrorByCallback Failed to create engine [callback]`）；朗读同样，
@@ -211,7 +220,7 @@ ACP 实测契约（勿凭直觉改）：
   toast 文案「语音引擎启动失败（1002200001）：可能缺少离线中文语音包」。
   **复位入口（已真机验，2026-11-16，CMM-AL10 / API 26）**：设置页在 `!speechAsrUsable` 时显示「语音输入 / 重试」一行，点重试清标志并写
   `AppStorage['speechAsrUsable']`——`ChatView` 用 `@StorageLink` 绑这个 key，所以装好语音包后
-  **不用重装 App**，回对话就有麦克风。**设备限制记录**：平板 `6HT0125B29000226` 装不上
+  **不用重装 App**，回对话就有麦克风。**设备限制记录**：另一台旧平板装不上
   （`code:9568297 install failed due to older sdk version`），只有手机能跑。
   **重试流程已真机验**：点麦克风 → 授权 → 引擎失败 → 输入框麦克风消失 → 设置出现
   「语音输入 / 上次引擎启动失败，装好离线语音包后点右边重试 [重试]」→ 点重试 → 该行消失 →
@@ -346,7 +355,7 @@ ACP 实测契约（勿凭直觉改）：
   `notificationSlotType`（日志 `slotType: 65535`），下一轮换一台单用户设备时顺手补上再验。
   为定位这类「静默丢弃」，`Notify.publish()` 现在会 `hilog` 一行 attempt/enabled/published。
 
-- **`git` 工具已交付（2026-11-20，本地闭环，真机待验）**：HarmonyOS 没有 `git` 二进制，也不可能有
+- **`git` 工具已交付（2026-11-20，本地闭环 + 平板真机闭环）**：HarmonyOS 没有 `git` 二进制，也不可能有
   （禁 fork/exec），但"把仓库搬到手机上"这一步可以用纯 JS 补上。spike 先证明可行——`node --jitless`
   下 `wasm: false`，2MB 与 **92MB** packfile 都 clone 成功——再按实测设计成 `@ohos/dsh-tool-git`
   （六动作，`repos/<slug>`，走 bundle-insert）。**三个 spike 结论写进了代码**：内存 ≈100MB + 11×pack
@@ -359,7 +368,27 @@ ACP 实测契约（勿凭直觉改）：
   **两处踩过的坑**：①`ctx.systemPrompt.getSectionOrder("TOOL_GIT")` 返回 undefined，section API 直接
   拒绝（`order must be a finite number`）⇒ 整个插件没挂载、工具表停在 25——所以不写 systemPrompt 段，
   引导语移进工具 description；②`Span`/`Text` 之外这次是**参数归一化**：`repo.git/` 要先剥斜杠再剥
-  `.git`，否则网盘式地址会带后缀进 slug（单测抓到）。**真机未验**：手机当时锁屏。
+  `.git`，否则网盘式地址会带后缀进 slug（单测抓到）。**真机闭环见下一条平板记录**：`clone` 一次
+  `request to github.com timed out` 后重试成功（真实流量走过超时/重试路径），随后 `glob`/`read` 完成分析。
+
+- **平板整机重装 + 链接点击 + `git` 端到端（2026-11-20，MatePad Mini / tablet / API 26）**：
+  换设备后装不上，报 `code:9568332 install sign info inconsistent`——`signature generate --force`
+  轮换过签名身份，机上旧包与新证书不同源。**契约：改过签名就不能覆盖安装，必须先卸**：
+  `hdc shell bm uninstall -n com.qtepp.taharness`（带 `-k` 保留数据；不带 `-k` 全清）。
+  本次按用户选择**全清重装**，因此 `profile_prompted` 也被清掉 ⇒ 首启重新问了一次运行模式（预期行为，
+  不是回归）。重装后归档：`bridge-status.json` 给 `profile: ohos` / `node: v24.2.0` / `wasm: false`；
+  `bridge.log` 给 **`tools(26)`（含 `git`）** 与 `search=auto (deepseek-official for deepseek-official)`，
+  与之前设备记录一致；`devicetype=tablet` ⇒ ≥840vp 双栏（会话栏 + 对话）成立。
+  **`git` 真机端到端**：模型自己 `git clone` 本仓库到 `repos/qtepp-deepseek-harness-harmony`
+  （首次 `Error: request to github.com timed out`，重试成功——超时/重试路径被真实流量走过），
+  随后用 `glob`/`read` 分析并答出沙箱四层；回答里把这次 clone 描述成「depth-1 snapshot，不能 pull」，
+  与 `snapshot` 的语义一致。
+  **`glob` 锚点语义由此写进 description（同一 commit）**：带分隔符的 pattern 锚在**会话工作区**，
+  `path` 只缩小搜索范围、不改变锚点；两者同用时按「`path` 相对」理解会漏文件。
+  **链接点击两条路径真机验成**：单链接（`m.pcpop.com/article_6958496.html`）→ 直接交给系统浏览器打开；
+  一句多链接（转载 / 凤凰网 / 人民政协网）→ 弹「打开链接」选择框（标题下写明「这段文字里有多个链接」），
+  选「凤凰网」后打开该文。**契约**：`Span` 没有 onClick、ArkUI 也没有 span 级命中测，只能用整段
+  `Text` 接管点击；`linksOf()` 返回 1 条直开、≥2 条才弹框，否则就是「点了没反应」或「选错」。
 
 - **官方 dsh 上游已核对（2026-11-15）**：`deepseek-ai/deepseek-harness` master `39163dd3`
   = `dsh` **0.2.2-rc.3**，我们载荷钉的是 0.2.1-rc.4。**ACP 协议面没变**（9 方法 +

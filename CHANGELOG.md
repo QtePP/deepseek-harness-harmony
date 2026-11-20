@@ -7,6 +7,14 @@
 
 ### 新增
 
+- **`git` 工具（纯 JS，真机闭环）**：`@ohos/dsh-tool-git` 用 isomorphic-git（pako 解析 packfile，
+  **零 WASM**）把仓库经 HTTPS 落到 `repos/<slug>`，六个动作 `clone` / `snapshot` / `pull` / `log` /
+  `diff` / `status`，之后交给 `glob` / `grep` / `read` 分析。工具表 25 → **26**。
+  两条实测约束写进了代码：内存 ≈ 100MB + 11 × pack ⇒ `maxPackMb` 默认 50 且**中途 abort**；
+  shallow 仓**不能 pull**（js-git 抛 `TypeError`）⇒ `snapshot` 标只读、`pull` 按名字拒绝。
+  HTTP 客户端自己写（`node:https` 流式 + 字节计数），不用 `isomorphic-git/http/web`——后者经
+  fetch 垫片会全量缓冲、且进度只报对象数。真机：`clone` 本仓库一次超时后重试成功。
+
 - **`docs/API-AND-SEQUENCE.md`：接口清单 + 时序图**。此前**没有一份集中的 API 文档**，时序图只有
   `ARCHITECTURE.md` 里那段 ASCII 步骤（不可渲染）。本文补上：①能力域总览（9 个域，42 文件 / 15,447 行）；
   ②ACP 9 个方法与 SDK 5 个方法的签名表；③内部模块导出符号表（17 个模块）；④**6 张 mermaid 时序图**
@@ -21,6 +29,16 @@
   两条都不写数据、不改设置。**`ACCESS_NEARLINK` 是 user_grant/normal**，所以这条通道对三方应用是开着的。
 
 ### 修复
+
+- **Markdown 里的链接点了没反应**：渲染器给 `span.link` 加了样式，却**没有挂任何点击处理**；
+  而 ArkUI 的 `Span` 既没有 `onClick`，也没有 span 级命中测——点击事件只会落在整段 `Text` 上。
+  改为整段 `Text` 接管：`linksOf(raw)` 抽出这一段的链接列表，**1 条**直接交给系统浏览器
+  （`context.openLink()`，失败 toast「无法打开链接（code）」），**≥2 条**弹「打开链接」选择框
+  （标题下写明「这段文字里有多个链接」）。真机验成两条路径。
+
+- **`glob` 的锚点语义写在描述里**：带分隔符的 pattern 锚在**会话工作区**，不是 `path`；
+  `path` 只缩小搜索范围。两者同用时按「`path` 相对」理解会漏文件，故在工具 schema 里写清
+  （`path` 传 `repos/x` + pattern 仍要写 `repos/x/docs/*.md`，或用 `**/*.md`）。
 
 - **升级到 0.2.2 后应用起不来（严重）**：`dsh-credentials-local` 自己写的 `.credentials.yaml`
   落盘是 644，而它下次启动时 `assertOwnerOnly` 直接拒绝，报
