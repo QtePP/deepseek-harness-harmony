@@ -162,7 +162,9 @@ ACP 实测契约（勿凭直觉改）：
 ## 6. 环境与版本口径（易混点，统一说法）
 
 - **内嵌运行时 Node = v24.2.0**（libnode.so，设备端 `bridge-status.json` 的 `node` 字段）。
-- **本地装配/同构测试 Node = 22.22.2**（macOS 侧，见 `scripts/deploy.sh` 的 PATH）。两个数字并存，不是笔误。
+- **本地装配/测试 Node = PATH 上的 `node`**（这台机器是 homebrew 的 **v25.9.0**；DevEco 自带
+  `…/tools/node/bin/node` = **v24.14.1**，跑「与设备同大版本」的验证时用它）。**设备内嵌 v24.2.0**。
+  三个数字并存不是笔误；`scripts/*.sh` 没有钉 PATH，用的是调用者环境里的 node。
 - dsh **0.2.2-rc.5**（钉在 `scripts/assemble-payload.mjs` 的 `PINNED_DSH_VERSION`，**默认不再解析 `latest`**）；载荷 zip ≈**240MB**（剪掉 332MB 外国平台包后）；HAP ≈352MB（unsigned）；桥端口 4517。
 - `hdc` 不在 PATH：`/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc`。
 - 设备侧文件路径两种视角同目录：hdc shell `/data/app/el2/100/base/<bundle>/haps/entry/files/…`
