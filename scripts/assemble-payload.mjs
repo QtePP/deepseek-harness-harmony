@@ -125,6 +125,33 @@ function stageProfileTemplate() {
  * persistence layer imports it lazily at first turn and every turn would
  * fail with a module-not-found on the platform package.
  */
+/**
+ * Ship the repo's markdown docs inside the payload.
+ *
+ * The device has no checkout, so these are the only copy of the architecture
+ * notes that exists there — useful when the on-device agent is asked how the
+ * shell works. They are a BUILD-TIME SNAPSHOT: the repo copies stay
+ * authoritative, and nothing reads them at boot.
+ */
+function stageDocs() {
+  const docs = join(ROOT, 'docs')
+  if (!existsSync(docs)) {
+    return
+  }
+  const target = join(STAGING, 'docs')
+  rmSync(target, { recursive: true, force: true })
+  mkdirSync(target, { recursive: true })
+  let copied = 0
+  for (const entry of readdirSync(docs, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) {
+      continue
+    }
+    cpSync(join(docs, entry.name), join(target, entry.name))
+    copied++
+  }
+  process.stdout.write(`docs: staged ${copied} markdown files into payload/docs\n`)
+}
+
 function patchNodeModules() {
   const flock = join(STAGING, 'node_modules', '@deepseek-ai', 'node-addon-system', 'lib', 'flock.js')
   if (!existsSync(flock)) {
@@ -209,6 +236,7 @@ function pack() {
 prepareStaging()
 stageHost()
 stageProfileTemplate()
+stageDocs()
 pruneForeignPlatformPackages()
 patchNodeModules()
 const version = verify()

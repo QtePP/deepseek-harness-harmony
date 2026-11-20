@@ -67,6 +67,8 @@ export class Notify {
       }
       await notificationManager.requestEnableNotification(context)
       Notify.pendingRequest = false
+      hilog.info(DOMAIN, 'Notify', 'requestEnableNotification returned; enabled=%{public}s',
+        `${await notificationManager.isNotificationEnabled()}`)
       return '已请求通知权限'
     } catch (error) {
       const failure = error as BusinessError
@@ -125,10 +127,15 @@ export class Notify {
     }
     try {
       const enabled = await notificationManager.isNotificationEnabled()
+      // The phone has no terminal: without this line a dropped notification is
+      // indistinguishable from one the system never accepted. One line per
+      // attempt, greppable as `Notify` in hilog.
+      hilog.info(DOMAIN, 'Notify', 'publish attempt "%{public}s": enabled=%{public}s', title, `${enabled}`)
       if (!enabled) {
         // Backgrounded: the dialog cannot be shown here, so remember that the
         // user needs to be asked and drop this notification.
         Notify.pendingRequest = true
+        hilog.warn(DOMAIN, 'Notify', 'dropped: notifications disabled for this app')
         return
       }
       const request: notificationManager.NotificationRequest = {
@@ -142,6 +149,7 @@ export class Notify {
         }
       }
       await notificationManager.publish(request)
+      hilog.info(DOMAIN, 'Notify', 'published id=%{public}d', NOTIFY_ID)
     } catch (error) {
       // Notifications are best-effort: a denied permission or a missing slot
       // must never disturb the turn that triggered them.

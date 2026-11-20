@@ -328,6 +328,21 @@ ACP 实测契约（勿凭直觉改）：
   build-profile.json5`。注意它复用了同一组文件名（哈希后缀相同）——**覆盖的是内容**，这正是旧
   备份密文对不上的原因。
 
+- **第二次装机（2026-11-20，含 docs 载荷 + 通知诊断）**：重打包后 `payload/docs/` 带 **17 个
+  markdown**（构建期快照，权威副本仍在仓库；`assemble-payload.mjs` 的 `stageDocs()` 拷 `docs/*.md`）。
+  重装后**首启不再问运行模式**（`profile_prompted` 跨重装保留），`bridge-status.json` 仍是
+  `profile: ohos`，`tools(25)` / `search=auto (…)` 不变。**踩到一个装机的顺序坑**：`aa start` 对
+  **仍在后台运行**的应用只是「拉到前台」，不会重跑 `Index.init()` ⇒ 新载荷解包不会发生
+  （`payload.stamp` 仍是旧 zip 长度）。换载荷后必须 `aa force-stop` 再启动，或从桌面冷启。
+  **通知：发得出去，进不了当前用户的列表**。hilog 实证系统侧收到了它——
+  `NotificationParserFactory: Parse notification __100_20020319_com.qtepp.taharness__4517 … appLabel:"TA Harness"`、
+  `NotificationDataManager: SaveNtf …, isUpdate: true`——但紧接着
+  `Parse … failed, invalid creatorUserId: 100`（`currentUserId: 101`，`errorCodes:[999]`，`check data fail`），
+  通知面板里因此看不到卡片。根因是**设备的用户态**：应用 uid `20020319`（user 100）与当前界面用户 101 不一致，
+  公开 API 里**没有** `creatorUserId` 字段可以覆盖，我们改不了。待确认的一处：我们的请求没设
+  `notificationSlotType`（日志 `slotType: 65535`），下一轮换一台单用户设备时顺手补上再验。
+  为定位这类「静默丢弃」，`Notify.publish()` 现在会 `hilog` 一行 attempt/enabled/published。
+
 - **官方 dsh 上游已核对（2026-11-15）**：`deepseek-ai/deepseek-harness` master `39163dd3`
   = `dsh` **0.2.2-rc.3**，我们载荷钉的是 0.2.1-rc.4。**ACP 协议面没变**（9 方法 +
   `$/cancel_request`、5 种 `session/update`、`session/request_permission`），客户端无需改动。
