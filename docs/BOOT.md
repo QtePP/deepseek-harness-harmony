@@ -108,7 +108,7 @@ await entry.runCli()                                                      // :33
 
 ## 4. dsh 侧：runCli → runProfile → 挂载
 
-载荷里 `node_modules/@deepseek-ai/dsh/lib/`（0.2.1-rc.4）：
+载荷里 `node_modules/@deepseek-ai/dsh/lib/`（0.2.2-rc.5）：
 
 - `bin.js:207` `runCli()`：commander 解析 → `profile` 模式 → `runProfile()`（`:215`）。
   它只认自己的旗标（`--profile` / `--patch` / `--dump-config`），其余原样交给被挂载的 app 插件。
@@ -125,7 +125,7 @@ profile 是 `host/profile-ohos/profiles/ohos/package.json`：
 
 `@ohos/dsh-bundle-ohos/cordis.patch.yml` 才是鸿蒙适配的「插件表」：5 行 insert（纯 JS 搜索、
 进程内 PTC、密钥热更新、时间上下文、boot 自检）、2 行 disable（ripgrep 搜索、stock ptc）、
-`tools.mode = native`、以及 DeepSeek 模型目录覆写。
+以及 DeepSeek 模型目录覆写（**`tools.mode` 在 0.2.2 已被删除**，写它直接启动失败）。
 
 而 `host/patches/ohos.patch.yml` 是**平台禁用清单**（pwsh / plugin-manager / office / bash / jobs），
 `entry/.../common/PluginConfig.ets:62` 生成的 `user.patch.yml` 是设置页开关，两者都作为 `--patch`

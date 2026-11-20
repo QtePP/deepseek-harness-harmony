@@ -165,7 +165,7 @@ This repository is the **HarmonyOS shell** for [DeepSeek Harness](https://github
 git clone https://github.com/QtePP/deepseek-harness-harmony.git
 cd deepseek-harness-harmony
 
-# 1. 装配载荷（把 dsh 及依赖打包进 HAP，约 225MB，首次较慢）
+# 1. 装配载荷（把 dsh 及依赖打包进 HAP，约 240MB，首次较慢；版本钉在脚本里）
 node scripts/assemble-payload.mjs
 
 # 2. 部署到真机（自动处理签名）
@@ -246,6 +246,7 @@ scripts/               # 载荷装配、一键部署
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构图、协议面、事件渲染表 |
+| [BREAKTHROUGHS.md](docs/BREAKTHROUGHS.md) | 六件平台级突破与它们的代价（附排版版 [breakthroughs.html](docs/breakthroughs.html)） |
 | [BUILD.md](docs/BUILD.md) | 构建、签名、装机、排障 |
 | [GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) | 与桌面版的能力差距及根因 |
 | [SPIKE-ACP.md](docs/SPIKE-ACP.md) | ACP 协议实测记录 |

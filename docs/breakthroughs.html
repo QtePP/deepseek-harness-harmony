@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>突破清单：我们真正硬啃下来的六件事</title>
+<meta name="description" content="dsh 鸿蒙外壳的六件平台突破：进程内 Node、进程内 ACP、jitless fetch、自定义 profile、降级链、可观测性——含证据与代价。">
+<style>
+
+  /* ---------- tokens ---------- */
+  :root {
+    --paper: #F1F3F6;
+    --surface: #FFFFFF;
+    --ink: #12181F;
+    --ink-2: #46525F;
+    --ink-3: #6B7785;
+    --rule: #D8DEE6;
+    --rule-strong: #B9C3CF;
+    --accent: #1D5A87;
+    --accent-soft: #E7EFF6;
+    --signal: #A33A32;
+    --signal-soft: #F8EBE9;
+    --ok: #2C6350;
+    --ok-soft: #E6F0EB;
+
+    --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, "Times New Roman", serif;
+    --sans: "HarmonyOS Sans SC", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas, monospace;
+
+    --measure: 74ch;
+    --radius-outer: 14px;
+    --radius-inner: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0E1216;
+      --surface: #151B21;
+      --ink: #E7ECF2;
+      --ink-2: #B3BECB;
+      --ink-3: #8593A2;
+      --rule: #253039;
+      --rule-strong: #3A4753;
+      --accent: #86B9DA;
+      --accent-soft: #16242E;
+      --signal: #E09189;
+      --signal-soft: #2A1B1A;
+      --ok: #8CC3AC;
+      --ok-soft: #15251F;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #0E1216;
+    --surface: #151B21;
+    --ink: #E7ECF2;
+    --ink-2: #B3BECB;
+    --ink-3: #8593A2;
+    --rule: #253039;
+    --rule-strong: #3A4753;
+    --accent: #86B9DA;
+    --accent-soft: #16242E;
+    --signal: #E09189;
+    --signal-soft: #2A1B1A;
+    --ok: #8CC3AC;
+    --ok-soft: #15251F;
+  }
+
+  /* ---------- base ---------- */
+  *,
+  *::before,
+  *::after { box-sizing: border-box; }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { transition-duration: 1ms !important; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.75;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+
+  a:hover { text-decoration-thickness: 2px; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  code, kbd, samp {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    font-variant-ligatures: none;
+  }
+
+  p code, li code, td code, dd code {
+    background: var(--accent-soft);
+    color: var(--ink);
+    padding: 0.08em 0.34em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* ---------- shell ---------- */
+  .skip {
+    position: absolute;
+    left: -9999px;
+  }
+  .skip:focus {
+    left: 12px;
+    top: 12px;
+    z-index: 9;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 10px 14px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-inner);
+  }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 22px 96px;
+  }
+
+  @media (min-width: 1080px) {
+    .shell {
+      display: grid;
+      grid-template-columns: 208px minmax(0, 1fr);
+      gap: 56px;
+      align-items: start;
+    }
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    max-width: var(--measure);
+    padding: 64px 0 8px;
+  }
+
+  @media (min-width: 1080px) {
+    .masthead { grid-column: 2; }
+  }
+
+  .masthead .kicker {
+    margin: 0 0 18px;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.01em;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .masthead h1 {
+    margin: 0 0 22px;
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(2rem, 1.35rem + 2.6vw, 3rem);
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    /* Break CJK headings at punctuation, not between two characters of a word. */
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+
+  .standfirst {
+    margin: 0 0 30px;
+    font-size: 1.16rem;
+    line-height: 1.7;
+    color: var(--ink-2);
+    max-width: 60ch;
+    text-wrap: pretty;
+  }
+
+  .standfirst strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  /* ---------- facts ---------- */
+  .facts {
+    display: grid;
+    gap: 0;
+    margin: 0 0 8px;
+    border-top: 1.5px solid var(--rule-strong);
+    max-width: var(--measure);
+  }
+
+  .facts > div {
+    display: grid;
+    grid-template-columns: 8.5em minmax(0, 1fr);
+    gap: 14px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  @media (max-width: 560px) {
+    .facts > div {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2px;
+      padding: 12px 0;
+    }
+  }
+
+  .facts dt {
+    margin: 0;
+    font-size: 0.86rem;
+    color: var(--ink-3);
+    line-height: 1.6;
+    padding-top: 2px;
+  }
+
+  .facts dd {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+    text-wrap: pretty;
+  }
+
+  /* ---------- toc ---------- */
+  .toc {
+    max-width: var(--measure);
+    margin: 40px 0 0;
+    padding: 18px 0 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  @media (min-width: 1080px) {
+    .toc {
+      grid-column: 1;
+      grid-row: 1 / span 3;
+      position: sticky;
+      top: 24px;
+      margin: 64px 0 0;
+      padding: 0;
+      border-top: 0;
+      max-width: none;
+    }
+  }
+
+  .toc h2 {
+    margin: 0 0 12px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+  }
+
+  .toc ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-left: 1px solid var(--rule);
+  }
+
+  .toc li { margin: 0; }
+
+  .toc a {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    min-height: 40px;
+    padding: 8px 12px;
+    color: var(--ink-2);
+    text-decoration: none;
+    font-size: 0.92rem;
+    line-height: 1.5;
+    border-left: 2px solid transparent;
+    margin-left: -1px;
+    transition-property: color, border-color, background-color;
+    transition-duration: 140ms;
+    transition-timing-function: ease-out;
+  }
+
+  .toc a:hover {
+    color: var(--ink);
+    background: var(--surface);
+  }
+
+  .toc a[aria-current="true"] {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .toc .no {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .toc a[aria-current="true"] .no { color: var(--accent); }
+
+  .theme-toggle {
+    margin-top: 18px;
+    min-height: 40px;
+    padding: 8px 14px;
+    font-family: var(--sans);
+    font-size: 0.86rem;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    cursor: pointer;
+    transition-property: color, border-color, background-color;
+    transition-duration: 140ms;
+    transition-timing-function: ease-out;
+  }
+
+  .theme-toggle:hover {
+    color: var(--ink);
+    border-color: var(--accent);
+  }
+
+  /* ---------- article ---------- */
+  main {
+    max-width: var(--measure);
+    padding-top: 8px;
+  }
+
+  @media (min-width: 1080px) {
+    main { grid-column: 2; }
+  }
+
+  section {
+    padding-top: 46px;
+    scroll-margin-top: 20px;
+  }
+
+  section + section { border-top: 1px solid var(--rule); }
+
+  h2 {
+    margin: 0 0 18px;
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 1.62rem;
+    line-height: 1.3;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+
+  h2 .no {
+    display: block;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+  }
+
+  h3 {
+    margin: 30px 0 10px;
+    font-family: var(--sans);
+    font-size: 1.04rem;
+    font-weight: 650;
+    line-height: 1.5;
+    text-wrap: balance;
+  }
+
+  h3 .tag {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    font-weight: 400;
+    color: var(--ink-3);
+    margin-left: 8px;
+  }
+
+  p { margin: 0 0 14px; text-wrap: pretty; }
+
+  ul, ol { margin: 0 0 16px; padding-left: 1.3em; }
+  li { margin: 0 0 7px; text-wrap: pretty; }
+  li::marker { color: var(--ink-3); }
+
+  strong { font-weight: 650; }
+
+  /* ---------- diagrams ---------- */
+  figure {
+    margin: 26px 0 30px;
+  }
+
+  .stack-frame {
+    border: 1.5px solid var(--rule-strong);
+    border-radius: var(--radius-outer);
+    padding: 12px;
+    background: var(--surface);
+  }
+
+  .band {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 11px 14px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-inner);
+    background: var(--paper);
+  }
+
+  .band b {
+    font-weight: 650;
+    font-size: 0.98rem;
+  }
+
+  .band span {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-3);
+  }
+
+  .band--ui b { color: var(--ink); }
+  .band--node { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, var(--rule)); }
+  .band--node b { color: var(--accent); }
+  .band--dsh { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 28%, var(--rule)); }
+  .band--dsh b { color: var(--ok); }
+
+  .bridge {
+    position: relative;
+    padding: 13px 0;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+  }
+
+  .bridge::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    top: 50%;
+    border-top: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+
+  .bridge span {
+    position: relative;
+    display: inline-block;
+    padding: 2px 10px;
+    background: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--rule));
+    border-radius: 999px;
+  }
+
+  figcaption {
+    margin-top: 12px;
+    font-size: 0.86rem;
+    line-height: 1.65;
+    color: var(--ink-3);
+    text-wrap: pretty;
+  }
+
+  /* ---------- ladder ---------- */
+  .ladder {
+    margin: 24px 0 28px;
+    padding: 0;
+    list-style: none;
+    border-left: 2px solid var(--rule);
+  }
+
+  .ladder li {
+    position: relative;
+    margin: 0;
+    padding: 12px 0 12px 22px;
+  }
+
+  .ladder li::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    top: 20px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--paper);
+    border: 2px solid var(--rule-strong);
+  }
+
+  .ladder li.is-hard::before { border-color: var(--signal); }
+  .ladder li.is-soft::before { border-color: var(--accent); }
+
+  .ladder .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+
+  .ladder .head b { font-weight: 650; }
+
+  .ladder .head .badge {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--rule-strong);
+    color: var(--ink-3);
+  }
+
+  .ladder .head .badge.hard { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 45%, var(--rule)); }
+  .ladder .head .badge.soft { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--rule)); }
+
+  .ladder p {
+    margin: 0;
+    font-size: 0.94rem;
+    color: var(--ink-2);
+  }
+
+  /* ---------- tables ---------- */
+  .table-wrap {
+    position: relative;
+    margin: 22px 0 26px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    border-top: 1.5px solid var(--rule-strong);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+
+  caption {
+    caption-side: top;
+    text-align: left;
+    padding: 0 0 8px;
+    font-size: 0.84rem;
+    color: var(--ink-3);
+  }
+
+  th {
+    text-align: left;
+    font-weight: 650;
+    font-size: 0.84rem;
+    color: var(--ink-2);
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--rule-strong);
+    vertical-align: bottom;
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 11px 14px 11px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    text-wrap: pretty;
+  }
+
+  tr:last-child td { border-bottom: 0; }
+
+  tbody tr:hover td { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+
+  td:first-child { font-weight: 600; }
+  td.num, .num { font-variant-numeric: tabular-nums; }
+
+  /* Long identifiers must wrap inside a cell instead of clipping the column;
+     break-word only splits a token when it cannot fit on a line of its own. */
+  td code {
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+
+  /* ---------- notes ---------- */
+  .note {
+    margin: 22px 0;
+    padding: 14px 18px 14px 16px;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius-inner) var(--radius-inner) 0;
+    background: var(--accent-soft);
+    font-size: 0.94rem;
+    line-height: 1.7;
+  }
+
+  .note > :last-child { margin-bottom: 0; }
+
+  .note .label {
+    display: block;
+    margin-bottom: 4px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--accent);
+  }
+
+  .note--warn {
+    border-left-color: var(--signal);
+    background: var(--signal-soft);
+  }
+  .note--warn .label { color: var(--signal); }
+
+  .note--ok {
+    border-left-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .note--ok .label { color: var(--ok); }
+
+  blockquote {
+    margin: 20px 0;
+    padding: 2px 0 2px 18px;
+    border-left: 2px solid var(--rule-strong);
+    color: var(--ink-2);
+    font-size: 0.96rem;
+  }
+
+  blockquote p { margin: 0 0 8px; }
+  blockquote p:last-child { margin-bottom: 0; }
+  blockquote cite {
+    display: block;
+    margin-top: 6px;
+    font-style: normal;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-3);
+  }
+
+  /* ---------- tradeoffs ---------- */
+  .tradeoffs {
+    margin: 24px 0;
+    border-top: 1.5px solid var(--rule-strong);
+  }
+
+  .tradeoff {
+    padding: 16px 0 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .tradeoff h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+  }
+
+  .tradeoff dl {
+    margin: 0;
+    display: grid;
+    gap: 4px;
+  }
+
+  .tradeoff .pair {
+    display: grid;
+    grid-template-columns: 4.2em minmax(0, 1fr);
+    gap: 10px;
+    font-size: 0.92rem;
+    line-height: 1.65;
+    color: var(--ink-2);
+  }
+
+  .tradeoff .pair dt {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    padding-top: 3px;
+    color: var(--ink-3);
+  }
+
+  .tradeoff .pair dd { margin: 0; text-wrap: pretty; }
+
+  .tradeoff .pair.gain dt { color: var(--ok); }
+  .tradeoff .pair.cost dt { color: var(--signal); }
+
+  /* ---------- conflict ---------- */
+  .conflict {
+    margin: 20px 0;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--signal);
+    border-radius: 0 var(--radius-outer) var(--radius-outer) 0;
+  }
+
+  .conflict h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+    color: var(--signal);
+  }
+
+  .conflict p { font-size: 0.94rem; margin-bottom: 8px; }
+  .conflict p:last-child { margin-bottom: 0; }
+
+  .conflict .verdict {
+    font-size: 0.94rem;
+    color: var(--ink);
+  }
+
+  .conflict .verdict b { color: var(--ink); }
+
+  /* ---------- footer ---------- */
+  footer {
+    max-width: var(--measure);
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1.5px solid var(--rule-strong);
+    font-size: 0.86rem;
+    line-height: 1.7;
+    color: var(--ink-3);
+  }
+
+  @media (min-width: 1080px) {
+    footer { grid-column: 2; }
+  }
+
+  footer p { margin: 0 0 8px; }
+
+  /* ---------- print ---------- */
+  @media print {
+    :root {
+      --paper: #FFFFFF;
+      --surface: #FFFFFF;
+      --ink: #000000;
+      --ink-2: #222222;
+      --ink-3: #555555;
+      --rule: #CCCCCC;
+      --rule-strong: #888888;
+      --accent: #0B3A5A;
+      --accent-soft: #F2F6F9;
+      --signal: #7A1F19;
+      --signal-soft: #FBF2F1;
+      --ok: #1E4A3A;
+      --ok-soft: #F1F7F4;
+    }
+    .shell { display: block; max-width: none; padding: 0; }
+    .toc, .theme-toggle, .skip { display: none; }
+    .masthead { padding-top: 0; }
+    main, footer, .masthead, .facts { max-width: none; }
+    section { break-inside: auto; padding-top: 22px; }
+    section + section { break-before: page; }
+    h2, h3 { break-after: avoid; }
+    .table-wrap, figure, .note, .conflict, .tradeoff { break-inside: avoid; }
+    table { min-width: 0; font-size: 9pt; }
+    body { font-size: 10.5pt; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ---------- case blocks ---------- */
+  .case {
+    margin: 0 0 28px;
+    padding: 2px 0 2px 18px;
+    border-left: 2px solid var(--accent);
+  }
+
+  .case h3 {
+    margin: 0 0 10px;
+    font-size: 1.06rem;
+  }
+
+  .case h3 .idx {
+    margin-right: 9px;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--accent);
+  }
+
+  .case dl { margin: 0; display: grid; gap: 8px; }
+
+  .case .row {
+    display: grid;
+    grid-template-columns: 4.6em minmax(0, 1fr);
+    gap: 12px;
+    font-size: 0.93rem;
+    line-height: 1.65;
+  }
+
+  .case .row dt {
+    margin: 0;
+    padding-top: 3px;
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--ink-3);
+  }
+
+  .case .row dd { margin: 0; color: var(--ink-2); text-wrap: pretty; }
+  .case .row.said dt { color: var(--signal); }
+  .case .row.did dt { color: var(--ok); }
+  .case .row.proof dt { color: var(--accent); }
+
+  .case .after { margin-top: 10px; }
+
+  .spaced { margin-top: 22px; }
+
+  /* ---------- pipeline ---------- */
+  .pipeline {
+    margin: 24px 0 28px;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+  }
+
+  .pipeline li {
+    position: relative;
+    padding: 0 0 20px 36px;
+    counter-increment: step;
+  }
+
+  .pipeline li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 23px;
+    height: 23px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 50%;
+    background: var(--surface);
+    font: 500 11px/23px var(--mono);
+    text-align: center;
+    color: var(--ink-3);
+  }
+
+  .pipeline li::after {
+    content: "";
+    position: absolute;
+    left: 11px;
+    top: 27px;
+    bottom: 3px;
+    border-left: 1px dashed var(--rule-strong);
+  }
+
+  .pipeline li:last-child { padding-bottom: 0; }
+  .pipeline li:last-child::after { display: none; }
+
+  .pipeline b {
+    display: block;
+    font-size: 0.96rem;
+    margin-bottom: 2px;
+  }
+
+  .pipeline span {
+    display: block;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--ink-2);
+  }
+
+  /* ---------- ranking ---------- */
+  .rank {
+    margin: 22px 0 8px;
+    padding: 0;
+    list-style: none;
+    border-top: 1.5px solid var(--rule-strong);
+  }
+
+  .rank li {
+    display: grid;
+    grid-template-columns: 2.4em minmax(0, 1fr);
+    gap: 14px;
+    margin: 0;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .rank .n {
+    font-family: var(--serif);
+    font-size: 1.55rem;
+    line-height: 1;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .rank b { display: block; margin-bottom: 3px; }
+  .rank p { margin: 0; font-size: 0.93rem; color: var(--ink-2); text-wrap: pretty; }
+
+  /* ---------- quiet ---------- */
+  .quiet .table-wrap { border-top-color: var(--rule); }
+  .quiet th { color: var(--ink-3); }
+  .quiet td { color: var(--ink-2); }
+  .quiet td:first-child { font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">跳到正文</a>
+
+<div class="shell">
+
+  <header class="masthead">
+    <p class="kicker">突破清单 · 2026-11-20 · 依据 <code>3f12dcb</code></p>
+    <h1>我们真正硬啃下来的<wbr>六件事</h1>
+    <p class="standfirst">
+      26 天、115 个 commit 里，够格叫「突破」的只有六件——都是<strong>平台明确说不行、没有现成方案可抄、而且真机闭环过</strong>的那类。
+      其余是苦工和补债，这一页也照实写。
+    </p>
+
+    <dl class="facts">
+      <div><dt>周期</dt><dd>2026-10-25 → 11-19，<span class="num">26</span> 天</dd></div>
+      <div><dt>提交</dt><dd><span class="num">115</span> 个 commit，动过 <span class="num">223</span> 个文件</dd></div>
+      <div><dt>真机结论</dt><dd><span class="num">54</span> 处写进 AGENTS.md，每条带取证</dd></div>
+      <div><dt>自研插件</dt><dd><span class="num">5</span> 个：搜索 / PTC / 密钥热更 / 时间上下文 / 自检</dd></div>
+      <div><dt>用例</dt><dd><span class="num">47</span> 个 ArkTS 用例 + <span class="num">5</span> 组载荷单测</dd></div>
+      <div><dt>代价</dt><dd>240MB 载荷 · 352MB HAP · 无 JIT · 无 shell</dd></div>
+    </dl>
+  </header>
+
+  <nav class="toc" aria-label="目录">
+    <h2>目录</h2>
+    <ol>
+      <li><a href="#criteria"><span class="no">00</span><span>什么才算突破</span></a></li>
+      <li><a href="#platform"><span class="no">01</span><span>六件平台突破</span></a></li>
+      <li><a href="#protocol"><span class="no">02</span><span>把黑盒写成契约</span></a></li>
+      <li><a href="#absence"><span class="no">03</span><span>用「没提供」当依据</span></a></li>
+      <li><a href="#method"><span class="no">04</span><span>方法论</span></a></li>
+      <li><a href="#not"><span class="no">05</span><span>什么不算突破</span></a></li>
+      <li><a href="#rank"><span class="no">06</span><span>只留三件</span></a></li>
+    </ol>
+    <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+  </nav>
+
+  <main id="main">
+
+    <section id="criteria">
+      <h2><span class="no">00</span>什么才算突破</h2>
+
+      <p>
+        「突破」这个词很容易通货膨胀。所以先定尺子——四条同时成立才算，缺一条就降级成苦工：
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>四条判据</caption>
+          <thead>
+            <tr><th scope="col">判据</th><th scope="col">为什么它把大部分工作筛掉</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>平台明确说不行</td><td>不是「麻烦」，是文档或权限模型直接判死：禁 fork、无 WASM、patch 不能加行</td></tr>
+            <tr><td>没有现成方案可抄</td><td>要么逆向机制，要么自己写；照文档做能成的事不算</td></tr>
+            <tr><td>真机闭环过</td><td>「理论上可行」不算，得在设备上跑出结果</td></tr>
+            <tr><td>用户能感知</td><td>模型能搜到文件、能改文件、能流式回答——不是内部重构</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        按这个尺子，六件够格。它们的共同点是：<strong>没有一件是「绕过限制」，每一件都是「换一条实现路径」</strong>——
+        限制还在，只是不再是瓶颈。
+      </p>
+    </section>
+
+    <section id="platform">
+      <h2><span class="no">01</span>六件平台突破</h2>
+
+      <div class="table-wrap">
+        <table>
+          <caption>平台说「不行」的六件事，逐一变成了「行」</caption>
+          <thead>
+            <tr><th scope="col">平台限制</th><th scope="col">常识结论</th><th scope="col">实际做到</th><th scope="col">换的路径</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>禁 fork/exec</td>
+              <td>跑不了 Node 运行时</td>
+              <td>同进程跑起完整 dsh</td>
+              <td><code>dlopen libnode.so</code> + <code>node::Start</code></td>
+            </tr>
+            <tr>
+              <td>没有子进程 stdio</td>
+              <td>ACP 用不了</td>
+              <td>进程内 ACP，零 spawn</td>
+              <td>回环 TCP → <code>PassThrough</code> → 覆盖 stdio</td>
+            </tr>
+            <tr>
+              <td>jitless ⇒ 无 WASM</td>
+              <td>fetch 全废</td>
+              <td>有 HTTP，且是干净的那种</td>
+              <td>整族替换 + ESM resolve hook</td>
+            </tr>
+            <tr>
+              <td>patch 只能改/禁已有行</td>
+              <td>平台插件装不进去</td>
+              <td>5 个自研插件真实挂载</td>
+              <td>自定义 profile + bundle <code>insert</code></td>
+            </tr>
+            <tr>
+              <td>禁硬链接 + 非 POSIX 挂载</td>
+              <td>原子写、文件工具必炸</td>
+              <td>write / edit / patch 全部可用</td>
+              <td>三条降级链，打在 ESM 快照之前</td>
+            </tr>
+            <tr>
+              <td>无终端</td>
+              <td>设备上是黑盒</td>
+              <td>有可观测性</td>
+              <td>boot-report + 三份日志 + 诊断面板</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="cases">
+
+        <div class="case">
+          <h3><span class="idx">01</span>同进程 Node：地基，但不是我们一个人铺的</h3>
+          <dl>
+            <div class="row said"><dt>平台说</dt><dd>禁 fork/exec，不能 <code>spawn('node')</code>。</dd></div>
+            <div class="row did"><dt>我们做</dt><dd>把 Node 作为本进程的一个 detached pthread 拉起来，跑真 dsh。</dd></div>
+            <div class="row proof"><dt>证据</dt><dd><code>bridge-status.json</code> 里 <code>node=24.2.0</code>、<code>wasm=false</code>；真机启动 0 个未激活行。</dd></div>
+            <div class="row"><dt>代价</dt><dd>崩溃即终态（<code>node::Start</code> 每进程一次）、无进程隔离、必须劫持 stdio、载荷 240MB。</dd></div>
+          </dl>
+          <p class="after">
+            诚实归属：<strong>引擎入进程是第三方 <code>@fellow99/node-bridge</code> 做的</strong>。我们的突破是「让 dsh 在这个引擎上活下来」——
+            <code>--jitless --expose-internals</code> 的取舍、九个环境变量的接线、密钥不走 env 而走 0600 文件（原生桥会把 env dump 进日志），
+            以及「首次连入才 boot dsh」这个顺序，保证 stdout 从第一帧起就有接收方。
+          </p>
+        </div>
+
+        <div class="case">
+          <h3><span class="idx">02</span>进程内 ACP：官方文档没给的路</h3>
+          <dl>
+            <div class="row said"><dt>平台说</dt><dd>ACP 是「宿主 spawn 一个子进程，用 stdio 说话」——这条路在鸿蒙上直接死。</dd></div>
+            <div class="row did"><dt>我们做</dt><dd>不换协议，换掉「stdio」这个概念本身：socket 进来 → 管道进进程级 <code>PassThrough</code> → dsh 以为自己在读 stdin。</dd></div>
+            <div class="row proof"><dt>证据</dt><dd>9 个方法 + 流式 + 服务端审批全部真机闭环；还能用 <code>hdc fport</code> 从电脑直接驱动设备端运行时。</dd></div>
+            <div class="row"><dt>代价</dt><dd>桥是单客户端（新连接顶掉旧连接）；断线重连语义得自己扛。</dd></div>
+          </dl>
+          <p class="after">
+            三个细节全是踩出来的：Node 24 里 <code>process.stdin</code> 是 getter-only（直接赋值抛），必须 <code>defineProperty</code>；
+            流必须是<strong>进程级</strong>的（每次连接重建会让重连后的运行时读一根孤儿管道）；socket 断开只能 pause 不能 end
+            ——stdin EOF 会被 dsh 当成 shutdown。
+          </p>
+        </div>
+
+        <div class="case">
+          <h3><span class="idx">03</span>fetch-shim：一次「为什么必须这样」的推导</h3>
+          <dl>
+            <div class="row said"><dt>平台说</dt><dd>jitless ⇒ 没有 WebAssembly ⇒ undici 的 llhttp 起不来 ⇒ fetch 全废。</dd></div>
+            <div class="row did"><dt>我们做</dt><dd>整族替换 <code>fetch / Headers / Response / Request / FormData</code>，再挂一个 ESM resolve hook 拦 <code>await import('undici')</code>。</dd></div>
+            <div class="row proof"><dt>证据</dt><dd>启动即 <code>boot: sdk runtime mounted</code>，0 fatal；旧版本只剩一条良性的 <code>WebAssembly is not defined</code>。</dd></div>
+            <div class="row"><dt>代价</dt><dd>无 WASM 连带：TS 擦除不可用（模型要写纯 JS）、sharp 只能原字节直通。</dd></div>
+          </dl>
+          <p class="after">
+            关键发现：<strong>只换 <code>fetch</code> 会崩</strong>。因为 dsh 启动期会读全局 <code>Headers</code>，一读就触发 undici 的惰性物化，
+            而它的 llhttp 是 WASM——崩在启动阶段，日志里只留一条看起来「良性」的 unhandled rejection。这是本项目技术含量最高的单点。
+          </p>
+        </div>
+
+        <div class="case">
+          <h3><span class="idx">04</span>自定义 profile：把「不能加行」逆向成一套机制</h3>
+          <dl>
+            <div class="row said"><dt>平台说</dt><dd>patch 只能改或禁已有行，不能新增。</dd></div>
+            <div class="row did"><dt>我们做</dt><dd>新行只能来自 bundle 的 <code>cordis.patch.yml</code> 顶层 <code>- insert:</code>，且插件包必须写进 <strong>bundle 的 <code>dependencies</code></strong>。</dd></div>
+            <div class="row proof"><dt>证据</dt><dd>5 个插件真实挂载；<code>--dump-config</code> 行命中；真机工具表含 <code>glob</code>/<code>grep</code> 且无 <code>bash</code>。</dd></div>
+            <div class="row"><dt>代价</dt><dd>装配链复杂；升级 dsh 要复核行 id；载荷里残留的同名测试包会遮蔽 profile 内的新版。</dd></div>
+          </dl>
+          <p class="after">
+            价值不在「我们装上了插件」，而在<strong>「不 fork dsh 也能给平台加能力」这条路被证明了</strong>——
+            纯 JS 搜索、in-process PTC、密钥热更新、时间上下文、boot 自检，五件都挂在这条路上。
+          </p>
+        </div>
+
+        <div class="case">
+          <h3><span class="idx">05</span>三条降级链：每条都只在真机上暴露</h3>
+          <dl>
+            <div class="row said"><dt>平台说</dt><dd>禁硬链接；沙箱只认 app files 根以下；<code>/storage/Users</code> 是 FUSE 语义。</dd></div>
+            <div class="row did"><dt>我们做</dt><dd><code>copyFile(COPYFILE_EXCL)</code> 保排他语义 / 只读 open 目录给空壳 handle / 三条 mount-aware 降级。</dd></div>
+            <div class="row proof"><dt>证据</dt><dd>会话写得进；内联图片不再报「unable to persist」；绑定用户目录后写文件正常。</dd></div>
+            <div class="row"><dt>代价</dt><dd>每一条都必须「只在这个挂载上容忍、其它一律照抛」——放宽一点就是把错误吞掉。</dd></div>
+          </dl>
+          <p class="after">
+            共同点：<strong>都不是功能缺失，而是某个底层 syscall 的语义在这个文件系统上不成立</strong>。
+            这类问题纸面推不出来，只能真机撞。
+          </p>
+        </div>
+
+        <div class="case">
+          <h3><span class="idx">06</span>无终端 → 可观测性</h3>
+          <dl>
+            <div class="row said"><dt>平台说</dt><dd>手机上没有 shell，出了问题只能猜。</dd></div>
+            <div class="row did"><dt>我们做</dt><dd>启动 5 秒后把<strong>已注册工具名 + web search/fetch 就绪状态</strong>写进 <code>bridge.log</code>。</dd></div>
+            <div class="row proof"><dt>证据</dt><dd>当场结掉两个悬案：工具表 21 还是 25（是 25，某台机器关了 <code>tool-fs</code> 开关）、「模型说不能搜网」到底是哪种原因。</dd></div>
+            <div class="row"><dt>代价</dt><dd>它只是诊断，不修复任何东西；而且它自己也会过时——升到 rc.5 后真的误报过 <code>search=ambiguous</code>，因为上游把搜索改成按路由偏好选、它还在按「唯一可用」判定。已按规则修好（单测 11 → 20）。</dd></div>
+          </dl>
+        </div>
+
+      </div>
+    </section>
+
+    <section id="protocol">
+      <h2><span class="no">02</span>把黑盒写成契约</h2>
+
+      <p>
+        这一层不算「平台突破」，但它是<strong>别人抄不走的部分</strong>：每一条都是真机实测出来的，写进注释就是契约。
+        最反直觉的四条：
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th scope="col">契约</th><th scope="col">按直觉做会怎样</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>session/cancel</code> 是通知</td><td>带 id 发（当请求）→ <code>Method not found</code></td></tr>
+            <tr><td><code>set_config_option</code> 的 model value 是 JSON 数组字符串</td><td>传对象 → 静默不改，没有报错</td></tr>
+            <tr><td>选项集会收缩</td><td>缓存旧列表 → 切走默认模型后切不回来，<code>-32602</code></td></tr>
+            <tr><td>不答审批 = 无限挂起</td><td>以为会超时失败 → 实际是整轮卡死，服务端不自动放行</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="label">最有价值的一条：协议缺陷 → 产品设计</span>
+        <p>
+          断线时正在跑的那一轮，<strong>客户端无从判断它何时结束</strong>：原 <code>session/prompt</code> 的响应随 socket 一起丢了，
+          而 <code>session/update</code> 帧里没有 turn id。协议给不出答案，只能在产品层解决——
+          <code>close</code> 掐掉孤儿轮 → <code>resume</code> → 把消息标成「已中断」让用户决定重发。
+          这条转化比任何一条协议实现都难写。
+        </p>
+      </div>
+    </section>
+
+    <section id="absence">
+      <h2><span class="no">03</span>用「官方没提供」当设计依据</h2>
+
+      <p>
+        官方 ACP README 明确写「intentionally exposes only the standard ACP v1 surface」，并点名
+        cards / plans / titles / todos / terminal views <strong>不在协议里</strong>。
+        这句话别人看是限制，我们看是<strong>唯一路径的证明</strong>：
+      </p>
+
+      <ul>
+        <li><strong>待办条 / 目标条 / 上下文小环 / 每轮用量 / 子代理计数</strong>——全部从 <code>tool_call</code> 参数反推，零协议改动，冷启动还能从持久化轨迹重建。</li>
+        <li><strong>密钥热更新</strong>——dsh 启动期冻结 env 快照，改 env 永远无效；所以不碰 env，改成监听暂存文件 → <code>credentials.set()</code>，2 秒生效。</li>
+        <li><strong>图片存相册</strong>——用 <code>SaveButton</code> 安全组件换临时媒体权限，而不是申请受限权限（那要过 AGC 审批，还会把普通应用变成受限应用）。</li>
+        <li><strong>语音</strong>——先勘误旧结论（「SDK 不含 CoreSpeechKit」是错的，只看了 <code>openharmony/ets/kits</code>，没看 <code>hms/ets/kits</code>），再做「引擎起不来也不烂」的降级 + 复位入口。</li>
+      </ul>
+    </section>
+
+    <section id="method">
+      <h2><span class="no">04</span>方法论：把「能不能上设备」变成可本地预演</h2>
+
+      <p>如果只能带走一件，我选这个。以前「设备上跑不起来」是个黑洞，只能反复刷机猜；现在真机被降级成最后一道闸。</p>
+
+      <ol class="pipeline">
+        <li><b>改 host/</b><span>只动 <code>bootstrap.cjs</code>、垫片、profile 模板或补丁 YAML。</span></li>
+        <li><b><code>--dump-config</code></b><span>看行 id 是否命中、禁用行是否生效、<code>tools</code> 行的 mode 对不对。</span></li>
+        <li><b>本地起一次 runtime</b><span><code>--profile ohos</code> + 等 boot-report。零警告才算过。</span></li>
+        <li><b>三段验证</b><span>载荷单测 + ArkTS 检查 + LocalUnit，一条 <code>scripts/test.sh</code> 跑完。</span></li>
+        <li><b>最后才装机</b><span>重打载荷 → build → 签名 → 装。真机只用来确认，不用来发现。</span></li>
+      </ol>
+
+      <p>
+        这套顺序救过一次典型的坑：<code>schedule</code> 插件插进去后，本地日志直接给出
+        <code>pending (waiting for service: sessionController)</code>——当场判定「缺的是宿主服务，不是插件」，
+        回滚，没浪费一次装机。
+      </p>
+
+      <p>
+        配套的是<strong>证据纪律</strong>：先取证再下结论。语音那条结论错了四天，错在只看了一个目录；
+        工具数 21 的争论，错在把「用户关了开关」当成「升级回归」。
+      </p>
+    </section>
+
+    <section id="not" class="quiet">
+      <h2><span class="no">05</span>什么不算突破</h2>
+
+      <p>清单的另一半同样重要——这四类工作占了大部分时间，但按判据一条都不够格。</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>不在清单里，理由各不相同</caption>
+          <thead>
+            <tr><th scope="col">类别</th><th scope="col">内容</th><th scope="col">为什么不算</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>苦工</td>
+              <td>UI 对齐 dsh-go 的十几条：流式、排队、引用、重答、搜索、置顶、归档、多选、分享卡、导出</td>
+              <td>量很大（15k 行 ArkTS），但没有一条是「平台说不行」</td>
+            </tr>
+            <tr>
+              <td>补债</td>
+              <td>真机缺陷：父手势吞子手势、顶栏落进状态栏、重启丢回复、通知授权时机</td>
+              <td>是我们自己写出来的 bug，修好只是回到基线</td>
+            </tr>
+            <tr>
+              <td>流程债</td>
+              <td>三次口径漂移：默认 profile、工具数 21/25、ARCHITECTURE.md 过时</td>
+              <td>还没还；而且默认 profile 那条现在是产品缺陷</td>
+            </tr>
+            <tr>
+              <td>未突破</td>
+              <td>默认 profile 仍是 <code>sdk</code>，全新安装跑的是降级路径</td>
+              <td>这是「还没做成」，不是「做到了」</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="rank">
+      <h2><span class="no">06</span>只留三件</h2>
+
+      <p>如果这个项目只能留下三样东西，按「换来的能力 ÷ 付出的代价」排序：</p>
+
+      <ol class="rank">
+        <li>
+          <span class="n">1</span>
+          <div>
+            <b>进程内 ACP</b>
+            <p>它让「协议层」这件事在鸿蒙上重新存在。没有它，后面所有流式、审批、取消、重连都无从谈起。</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">2</span>
+          <div>
+            <b>fetch-shim 的整族替换</b>
+            <p>它不是补丁，是一次对「为什么必须这样」的完整推导——而且推导错一步，应用就崩在启动阶段。</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">3</span>
+          <div>
+            <b>自定义 profile 的 route-table 机制</b>
+            <p>它把「不能 fork dsh」从限制变成了可扩展性：平台差异不再需要改上游源码。</p>
+          </div>
+        </li>
+      </ol>
+
+      <p class="spaced">
+        第 4 名留给 <strong>boot-report</strong>。技术含量不高，但它把整个项目的可调试性抬了一个台阶——
+        而可调试性，是这 26 天里唯一让「猜」变成「看」的东西。
+      </p>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>
+      依据 <code>3f12dcb</code>（2026-11-19）的代码与真机记录整理，2026-11-20 成文。
+      口径来源：AGENTS.md §2–§7、<code>host/</code> 与 <code>entry/src/main/ets/</code> 源码、<code>docs/SPIKE-ACP.md</code>、<code>docs/GAP-ANALYSIS.md</code>。
+    </p>
+    <p>
+      权威文本：<a href="BREAKTHROUGHS.md">docs/BREAKTHROUGHS.md</a>（本页是它的排版版，改内容先改那里）。
+      与 <a href="on-device-architecture.html">端侧架构说明</a> 互补：那一页讲「现在长什么样」，这一页讲「哪些地方是硬啃下来的、代价是什么」。
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.querySelector('[data-theme-toggle]');
+  var KEY = 'dsh-arch-theme';
+
+  function systemDark() {
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { return false; }
+  }
+  function current() {
+    return root.getAttribute('data-theme') || (systemDark() ? 'dark' : 'light');
+  }
+  function paint() {
+    if (!btn) return;
+    var dark = current() === 'dark';
+    btn.textContent = dark ? '浅色' : '深色';
+    btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+  }
+  try {
+    var saved = window.localStorage.getItem(KEY);
+    if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+  } catch (e) {}
+  paint();
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var next = current() === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { window.localStorage.setItem(KEY, next); } catch (e) {}
+      paint();
+    });
+  }
+
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+  var byId = {};
+  links.forEach(function (a) {
+    var id = (a.getAttribute('href') || '').replace('#', '');
+    if (id) byId[id] = a;
+  });
+  function mark(id) {
+    links.forEach(function (a) { a.removeAttribute('aria-current'); });
+    if (byId[id]) byId[id].setAttribute('aria-current', 'true');
+  }
+
+  var sections = Array.prototype.slice.call(document.querySelectorAll('main section[id]'));
+  var seen = {};
+  function refresh() {
+    for (var i = 0; i < sections.length; i++) {
+      if (seen[sections[i].id]) { mark(sections[i].id); return; }
+    }
+  }
+
+  /* Deterministic initial state: the first section, not whichever entry fired last. */
+  if (sections.length) mark(sections[0].id);
+
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) seen[entry.target.id] = true;
+        else delete seen[entry.target.id];
+      });
+      refresh();
+    }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
+    sections.forEach(function (s) { io.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>

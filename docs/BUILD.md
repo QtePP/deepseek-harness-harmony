@@ -50,7 +50,8 @@ node scripts/assemble-payload.mjs
 `host/bootstrap.cjs`、`host/fetch-shim.cjs` 与 `host/patches/` → 校验 `lib/bin.js` 存在 →
 打成 `entry/src/main/resources/rawfile/dsh-payload.zip`。
 
-迭代时可加 `--skip-install` 只重新打包；指定版本用 `--dsh-version 0.2.1-rc.4`；
+迭代时可加 `--skip-install` 只重新打包；版本**默认取脚本里的 `PINNED_DSH_VERSION`**（0.2.2-rc.5），
+临时换版本用 `--dsh-version <ver>`——但换版本要连带跑完三段验证与口径更新；
 换一个全新的 staging 目录用 `--staging .build/payload-b`（避免删大目录触发安全策略）。
 
 **为什么必须 `--ignore-scripts`**：`koffi` 是 dsh 的普通依赖，安装时会尝试用 CMake 编译原生
@@ -205,7 +206,7 @@ assembleApp` 一次构建出**未签名** HAP 与 .app（仓库口径的 `build-
 
 ### 分发前还要想清楚
 
-- **体积 335MB**：含 225MB dsh 载荷，首次启动解包 60–90 秒
+- **体积 335MB**：含 240MB dsh 载荷，首次启动解包 60–90 秒
 - **API 26 门槛**：HarmonyOS 6.x 及更早装不上，当前装机量有限
 - **接收方需自备 API Key**：密钥不能随包分发
 - **上架需审核**：本脚本只产出可安装的包，上架 AppGallery 另需在 AGC 提交

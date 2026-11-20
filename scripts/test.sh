@@ -114,7 +114,7 @@ suite_unit() {
     skip "payload 树不存在，先跑 node scripts/assemble-payload.mjs"
     return
   fi
-  local suites="dsh-tool-fs-search-js dsh-ptc-runtime-vm dsh-credentials-live"
+  local suites="dsh-tool-fs-search-js dsh-ptc-runtime-vm dsh-credentials-live dsh-boot-report"
   for name in $suites; do
     local dir="$PAYLOAD/$name"
     if [ ! -d "$dir/test" ]; then

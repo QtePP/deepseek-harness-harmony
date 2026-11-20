@@ -1,0 +1,1469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh 的鸿蒙外壳：端侧架构说明</title>
+<meta name="description" content="一个 HAP、一个进程、三层语言、一条 TCP：dsh 鸿蒙外壳的运行时、宿主适配层、协议层、沙箱与架构取舍。">
+<style>
+  /* ---------- tokens ---------- */
+  :root {
+    --paper: #F1F3F6;
+    --surface: #FFFFFF;
+    --ink: #12181F;
+    --ink-2: #46525F;
+    --ink-3: #6B7785;
+    --rule: #D8DEE6;
+    --rule-strong: #B9C3CF;
+    --accent: #1D5A87;
+    --accent-soft: #E7EFF6;
+    --signal: #A33A32;
+    --signal-soft: #F8EBE9;
+    --ok: #2C6350;
+    --ok-soft: #E6F0EB;
+
+    --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, "Times New Roman", serif;
+    --sans: "HarmonyOS Sans SC", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas, monospace;
+
+    --measure: 74ch;
+    --radius-outer: 14px;
+    --radius-inner: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0E1216;
+      --surface: #151B21;
+      --ink: #E7ECF2;
+      --ink-2: #B3BECB;
+      --ink-3: #8593A2;
+      --rule: #253039;
+      --rule-strong: #3A4753;
+      --accent: #86B9DA;
+      --accent-soft: #16242E;
+      --signal: #E09189;
+      --signal-soft: #2A1B1A;
+      --ok: #8CC3AC;
+      --ok-soft: #15251F;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #0E1216;
+    --surface: #151B21;
+    --ink: #E7ECF2;
+    --ink-2: #B3BECB;
+    --ink-3: #8593A2;
+    --rule: #253039;
+    --rule-strong: #3A4753;
+    --accent: #86B9DA;
+    --accent-soft: #16242E;
+    --signal: #E09189;
+    --signal-soft: #2A1B1A;
+    --ok: #8CC3AC;
+    --ok-soft: #15251F;
+  }
+
+  /* ---------- base ---------- */
+  *,
+  *::before,
+  *::after { box-sizing: border-box; }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { transition-duration: 1ms !important; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.75;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+
+  a:hover { text-decoration-thickness: 2px; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  code, kbd, samp {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    font-variant-ligatures: none;
+  }
+
+  p code, li code, td code, dd code {
+    background: var(--accent-soft);
+    color: var(--ink);
+    padding: 0.08em 0.34em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* ---------- shell ---------- */
+  .skip {
+    position: absolute;
+    left: -9999px;
+  }
+  .skip:focus {
+    left: 12px;
+    top: 12px;
+    z-index: 9;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 10px 14px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-inner);
+  }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 22px 96px;
+  }
+
+  @media (min-width: 1080px) {
+    .shell {
+      display: grid;
+      grid-template-columns: 208px minmax(0, 1fr);
+      gap: 56px;
+      align-items: start;
+    }
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    max-width: var(--measure);
+    padding: 64px 0 8px;
+  }
+
+  @media (min-width: 1080px) {
+    .masthead { grid-column: 2; }
+  }
+
+  .masthead .kicker {
+    margin: 0 0 18px;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.01em;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .masthead h1 {
+    margin: 0 0 22px;
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(2rem, 1.35rem + 2.6vw, 3rem);
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    /* Break CJK headings at punctuation, not between two characters of a word. */
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+
+  .standfirst {
+    margin: 0 0 30px;
+    font-size: 1.16rem;
+    line-height: 1.7;
+    color: var(--ink-2);
+    max-width: 60ch;
+    text-wrap: pretty;
+  }
+
+  .standfirst strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  /* ---------- facts ---------- */
+  .facts {
+    display: grid;
+    gap: 0;
+    margin: 0 0 8px;
+    border-top: 1.5px solid var(--rule-strong);
+    max-width: var(--measure);
+  }
+
+  .facts > div {
+    display: grid;
+    grid-template-columns: 8.5em minmax(0, 1fr);
+    gap: 14px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  @media (max-width: 560px) {
+    .facts > div {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2px;
+      padding: 12px 0;
+    }
+  }
+
+  .facts dt {
+    margin: 0;
+    font-size: 0.86rem;
+    color: var(--ink-3);
+    line-height: 1.6;
+    padding-top: 2px;
+  }
+
+  .facts dd {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+    text-wrap: pretty;
+  }
+
+  /* ---------- toc ---------- */
+  .toc {
+    max-width: var(--measure);
+    margin: 40px 0 0;
+    padding: 18px 0 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  @media (min-width: 1080px) {
+    .toc {
+      grid-column: 1;
+      grid-row: 1 / span 3;
+      position: sticky;
+      top: 24px;
+      margin: 64px 0 0;
+      padding: 0;
+      border-top: 0;
+      max-width: none;
+    }
+  }
+
+  .toc h2 {
+    margin: 0 0 12px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+  }
+
+  .toc ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-left: 1px solid var(--rule);
+  }
+
+  .toc li { margin: 0; }
+
+  .toc a {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    min-height: 40px;
+    padding: 8px 12px;
+    color: var(--ink-2);
+    text-decoration: none;
+    font-size: 0.92rem;
+    line-height: 1.5;
+    border-left: 2px solid transparent;
+    margin-left: -1px;
+    transition-property: color, border-color, background-color;
+    transition-duration: 140ms;
+    transition-timing-function: ease-out;
+  }
+
+  .toc a:hover {
+    color: var(--ink);
+    background: var(--surface);
+  }
+
+  .toc a[aria-current="true"] {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .toc .no {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .toc a[aria-current="true"] .no { color: var(--accent); }
+
+  .theme-toggle {
+    margin-top: 18px;
+    min-height: 40px;
+    padding: 8px 14px;
+    font-family: var(--sans);
+    font-size: 0.86rem;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    cursor: pointer;
+    transition-property: color, border-color, background-color;
+    transition-duration: 140ms;
+    transition-timing-function: ease-out;
+  }
+
+  .theme-toggle:hover {
+    color: var(--ink);
+    border-color: var(--accent);
+  }
+
+  /* ---------- article ---------- */
+  main {
+    max-width: var(--measure);
+    padding-top: 8px;
+  }
+
+  @media (min-width: 1080px) {
+    main { grid-column: 2; }
+  }
+
+  section {
+    padding-top: 46px;
+    scroll-margin-top: 20px;
+  }
+
+  section + section { border-top: 1px solid var(--rule); }
+
+  h2 {
+    margin: 0 0 18px;
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 1.62rem;
+    line-height: 1.3;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+
+  h2 .no {
+    display: block;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+  }
+
+  h3 {
+    margin: 30px 0 10px;
+    font-family: var(--sans);
+    font-size: 1.04rem;
+    font-weight: 650;
+    line-height: 1.5;
+    text-wrap: balance;
+  }
+
+  h3 .tag {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    font-weight: 400;
+    color: var(--ink-3);
+    margin-left: 8px;
+  }
+
+  p { margin: 0 0 14px; text-wrap: pretty; }
+
+  ul, ol { margin: 0 0 16px; padding-left: 1.3em; }
+  li { margin: 0 0 7px; text-wrap: pretty; }
+  li::marker { color: var(--ink-3); }
+
+  strong { font-weight: 650; }
+
+  /* ---------- diagrams ---------- */
+  figure {
+    margin: 26px 0 30px;
+  }
+
+  .stack-frame {
+    border: 1.5px solid var(--rule-strong);
+    border-radius: var(--radius-outer);
+    padding: 12px;
+    background: var(--surface);
+  }
+
+  .band {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 11px 14px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-inner);
+    background: var(--paper);
+  }
+
+  .band b {
+    font-weight: 650;
+    font-size: 0.98rem;
+  }
+
+  .band span {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-3);
+  }
+
+  .band--ui b { color: var(--ink); }
+  .band--node { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, var(--rule)); }
+  .band--node b { color: var(--accent); }
+  .band--dsh { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 28%, var(--rule)); }
+  .band--dsh b { color: var(--ok); }
+
+  .bridge {
+    position: relative;
+    padding: 13px 0;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+  }
+
+  .bridge::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    top: 50%;
+    border-top: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+
+  .bridge span {
+    position: relative;
+    display: inline-block;
+    padding: 2px 10px;
+    background: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--rule));
+    border-radius: 999px;
+  }
+
+  figcaption {
+    margin-top: 12px;
+    font-size: 0.86rem;
+    line-height: 1.65;
+    color: var(--ink-3);
+    text-wrap: pretty;
+  }
+
+  /* ---------- ladder ---------- */
+  .ladder {
+    margin: 24px 0 28px;
+    padding: 0;
+    list-style: none;
+    border-left: 2px solid var(--rule);
+  }
+
+  .ladder li {
+    position: relative;
+    margin: 0;
+    padding: 12px 0 12px 22px;
+  }
+
+  .ladder li::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    top: 20px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--paper);
+    border: 2px solid var(--rule-strong);
+  }
+
+  .ladder li.is-hard::before { border-color: var(--signal); }
+  .ladder li.is-soft::before { border-color: var(--accent); }
+
+  .ladder .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+
+  .ladder .head b { font-weight: 650; }
+
+  .ladder .head .badge {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--rule-strong);
+    color: var(--ink-3);
+  }
+
+  .ladder .head .badge.hard { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 45%, var(--rule)); }
+  .ladder .head .badge.soft { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--rule)); }
+
+  .ladder p {
+    margin: 0;
+    font-size: 0.94rem;
+    color: var(--ink-2);
+  }
+
+  /* ---------- tables ---------- */
+  .table-wrap {
+    position: relative;
+    margin: 22px 0 26px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    border-top: 1.5px solid var(--rule-strong);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+
+  caption {
+    caption-side: top;
+    text-align: left;
+    padding: 0 0 8px;
+    font-size: 0.84rem;
+    color: var(--ink-3);
+  }
+
+  th {
+    text-align: left;
+    font-weight: 650;
+    font-size: 0.84rem;
+    color: var(--ink-2);
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--rule-strong);
+    vertical-align: bottom;
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 11px 14px 11px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    text-wrap: pretty;
+  }
+
+  tr:last-child td { border-bottom: 0; }
+
+  tbody tr:hover td { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+
+  td:first-child { font-weight: 600; }
+  td.num, .num { font-variant-numeric: tabular-nums; }
+
+  /* Long identifiers must wrap inside a cell instead of clipping the column;
+     break-word only splits a token when it cannot fit on a line of its own. */
+  td code {
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+
+  /* ---------- notes ---------- */
+  .note {
+    margin: 22px 0;
+    padding: 14px 18px 14px 16px;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius-inner) var(--radius-inner) 0;
+    background: var(--accent-soft);
+    font-size: 0.94rem;
+    line-height: 1.7;
+  }
+
+  .note > :last-child { margin-bottom: 0; }
+
+  .note .label {
+    display: block;
+    margin-bottom: 4px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--accent);
+  }
+
+  .note--warn {
+    border-left-color: var(--signal);
+    background: var(--signal-soft);
+  }
+  .note--warn .label { color: var(--signal); }
+
+  .note--ok {
+    border-left-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .note--ok .label { color: var(--ok); }
+
+  blockquote {
+    margin: 20px 0;
+    padding: 2px 0 2px 18px;
+    border-left: 2px solid var(--rule-strong);
+    color: var(--ink-2);
+    font-size: 0.96rem;
+  }
+
+  blockquote p { margin: 0 0 8px; }
+  blockquote p:last-child { margin-bottom: 0; }
+  blockquote cite {
+    display: block;
+    margin-top: 6px;
+    font-style: normal;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-3);
+  }
+
+  /* ---------- tradeoffs ---------- */
+  .tradeoffs {
+    margin: 24px 0;
+    border-top: 1.5px solid var(--rule-strong);
+  }
+
+  .tradeoff {
+    padding: 16px 0 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .tradeoff h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+  }
+
+  .tradeoff dl {
+    margin: 0;
+    display: grid;
+    gap: 4px;
+  }
+
+  .tradeoff .pair {
+    display: grid;
+    grid-template-columns: 4.2em minmax(0, 1fr);
+    gap: 10px;
+    font-size: 0.92rem;
+    line-height: 1.65;
+    color: var(--ink-2);
+  }
+
+  .tradeoff .pair dt {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    padding-top: 3px;
+    color: var(--ink-3);
+  }
+
+  .tradeoff .pair dd { margin: 0; text-wrap: pretty; }
+
+  .tradeoff .pair.gain dt { color: var(--ok); }
+  .tradeoff .pair.cost dt { color: var(--signal); }
+
+  /* ---------- conflict ---------- */
+  .conflict {
+    margin: 20px 0;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--signal);
+    border-radius: 0 var(--radius-outer) var(--radius-outer) 0;
+  }
+
+  .conflict h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+    color: var(--signal);
+  }
+
+  .conflict p { font-size: 0.94rem; margin-bottom: 8px; }
+  .conflict p:last-child { margin-bottom: 0; }
+
+  .conflict .verdict {
+    font-size: 0.94rem;
+    color: var(--ink);
+  }
+
+  .conflict .verdict b { color: var(--ink); }
+
+  /* ---------- footer ---------- */
+  footer {
+    max-width: var(--measure);
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1.5px solid var(--rule-strong);
+    font-size: 0.86rem;
+    line-height: 1.7;
+    color: var(--ink-3);
+  }
+
+  @media (min-width: 1080px) {
+    footer { grid-column: 2; }
+  }
+
+  footer p { margin: 0 0 8px; }
+
+  /* ---------- print ---------- */
+  @media print {
+    :root {
+      --paper: #FFFFFF;
+      --surface: #FFFFFF;
+      --ink: #000000;
+      --ink-2: #222222;
+      --ink-3: #555555;
+      --rule: #CCCCCC;
+      --rule-strong: #888888;
+      --accent: #0B3A5A;
+      --accent-soft: #F2F6F9;
+      --signal: #7A1F19;
+      --signal-soft: #FBF2F1;
+      --ok: #1E4A3A;
+      --ok-soft: #F1F7F4;
+    }
+    .shell { display: block; max-width: none; padding: 0; }
+    .toc, .theme-toggle, .skip { display: none; }
+    .masthead { padding-top: 0; }
+    main, footer, .masthead, .facts { max-width: none; }
+    section { break-inside: auto; padding-top: 22px; }
+    section + section { break-before: page; }
+    h2, h3 { break-after: avoid; }
+    .table-wrap, figure, .note, .conflict, .tradeoff { break-inside: avoid; }
+    table { min-width: 0; font-size: 9pt; }
+    body { font-size: 10.5pt; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+
+<div class="shell">
+
+  <header class="masthead">
+    <p class="kicker">架构说明 · 2026-11-20 · 依据 <code>3f12dcb</code></p>
+    <h1>一个进程里的四层：dsh 的鸿蒙外壳</h1>
+    <p class="standfirst">
+      外壳不实现任何 AI 能力。它做的只有一件事：<strong>把 dsh 放进一个不能 fork 的进程</strong>，
+      再把所有平台差异挡在 <code>host/</code> 和 YAML 补丁层里。
+    </p>
+
+    <dl class="facts">
+      <div><dt>载荷</dt><dd><code>dsh-payload.zip</code> 240MB，解包后 <code>node_modules</code> 1.0G</dd></div>
+      <div><dt>运行时</dt><dd>Node v24.2.0，<code>libnode.so</code> 同进程 <code>dlopen</code></dd></div>
+      <div><dt>桥</dt><dd><code>127.0.0.1:4517</code> · 换行 JSON-RPC 2.0 · 单客户端</dd></div>
+      <div><dt>大脑</dt><dd>dsh 0.2.2-rc.5，工具表 <span class="num">25</span> 个</dd></div>
+      <div><dt>默认 profile</dt><dd><code>sdk</code>（设置里可切 <code>acp</code>，运行时重映射为 <code>ohos</code>）</dd></div>
+      <div><dt>外壳</dt><dd><span class="num">42</span> 个 <code>.ets</code> / <span class="num">15,447</span> 行</dd></div>
+    </dl>
+  </header>
+
+  <nav class="toc" aria-label="目录">
+    <h2>目录</h2>
+    <ol>
+      <li><a href="#overview"><span class="no">00</span><span>一分钟版本</span></a></li>
+      <li><a href="#runtime"><span class="no">01</span><span>运行时</span></a></li>
+      <li><a href="#host"><span class="no">02</span><span>宿主适配层</span></a></li>
+      <li><a href="#protocol"><span class="no">03</span><span>协议层</span></a></li>
+      <li><a href="#sandbox"><span class="no">04</span><span>沙箱</span></a></li>
+      <li><a href="#constraints"><span class="no">05</span><span>平台约束</span></a></li>
+      <li><a href="#tradeoffs"><span class="no">06</span><span>架构取舍</span></a></li>
+      <li><a href="#drift"><span class="no">07</span><span>口径冲突（待拍板）</span></a></li>
+      <li><a href="#verify"><span class="no">08</span><span>怎么验证</span></a></li>
+    </ol>
+    <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">深色</button>
+  </nav>
+
+  <main id="main">
+
+    <!-- ============ 0 ============ -->
+    <section id="overview">
+      <h2><span class="no">00</span>一分钟版本</h2>
+
+      <p>
+        一个 HAP、一个进程、三层语言、一条 TCP。ArkTS 画界面，JavaScript 干活，C++ 引擎跑 JavaScript；
+        三者不是三个进程，是同一个进程里的三层，中间只隔一条回环 socket。
+      </p>
+
+      <figure>
+        <div class="stack-frame">
+          <div class="band band--ui">
+            <b>ArkTS / ArkUI</b>
+            <span>pages · view · 编译成 .abc 字节码</span>
+          </div>
+          <div class="bridge"><span>TCP 127.0.0.1:4517 · 换行 JSON-RPC 2.0</span></div>
+          <div class="band band--node">
+            <b>Node v24.2.0（同进程线程）</b>
+            <span>bootstrap.cjs · 十个垫片 · 回环桥</span>
+          </div>
+          <div class="band band--dsh">
+            <b>dsh 0.2.2-rc.5</b>
+            <span>会话 · 工具 · 插件 · 模型适配 · 持久化</span>
+          </div>
+        </div>
+        <figcaption>
+          唯一的跨语言边界是那条 TCP：ArkTS 与 JavaScript 之间没有绑定调用，只有帧。
+          Node 由 NAPI 引导件 <code>dlopen</code> + <code>dlsym(node::Start)</code> 拉进本进程，
+          跑在 detached pthread 上（32MB 栈）——UI 线程不能调 <code>node::Start</code>。
+        </figcaption>
+      </figure>
+
+      <p>
+        为什么必须同进程：鸿蒙禁 fork/exec，<code>spawn('node')</code> 这条路根本不存在。
+        出局的只是「宿主 spawn dsh」这一种形态，不是 dsh 本身。
+      </p>
+    </section>
+
+    <!-- ============ 1 ============ -->
+    <section id="runtime">
+      <h2><span class="no">01</span>运行时：一次启动，没有第二次</h2>
+
+      <div class="table-wrap">
+        <table>
+          <caption>运行时的五个硬事实</caption>
+          <thead>
+            <tr><th scope="col">事实</th><th scope="col">后果</th><th scope="col">出处</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>禁 fork/exec</td>
+              <td>不能 spawn node，不能跑 git / rg / bash</td>
+              <td><a href="../docs/GAP-ANALYSIS.md">GAP-ANALYSIS.md</a> §1</td>
+            </tr>
+            <tr>
+              <td><code>node::Start</code> 每进程一次</td>
+              <td>崩溃即终态，唯一恢复是重启应用；重试只能重连，不能重新投递</td>
+              <td><a href="../entry/src/main/ets/host/NodeHost.ets">NodeHost.ets</a>:92</td>
+            </tr>
+            <tr>
+              <td>UI 线程不能起 Node</td>
+              <td>投递到后台线程，再 <code>waitUntilRunning(30s)</code> 轮询</td>
+              <td><a href="../entry/src/main/ets/host/NodeHost.ets">NodeHost.ets</a>:151</td>
+            </tr>
+            <tr>
+              <td>启动参数 <code>--jitless --expose-internals</code></td>
+              <td>无 WebAssembly；内部模块访问走纯 JS 垫片</td>
+              <td><a href="../entry/src/main/ets/host/NodeHost.ets">NodeHost.ets</a>:132</td>
+            </tr>
+            <tr>
+              <td>引擎在 ABI 目录 <code>libs/arm64/</code></td>
+              <td>HAP 内是 <code>arm64-v8a</code>，引导件按候选链逐个试</td>
+              <td><a href="../oh_modules/@fellow99/node-bridge/README.md">node-bridge README</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="label">怪癖</span>
+        <p>
+          <code>process.cwd()</code> 是 <code>/</code>，<code>process.execPath</code> 是 <code>/system/bin/appspawn</code>，
+          <code>os.cpus()</code> 长度为 0。依赖这三者的库会静默出错，所以 <code>HOME</code> / <code>TMPDIR</code>
+          由宿主显式注入，沙箱根用会话 cwd 而不是进程 cwd。
+        </p>
+      </div>
+
+      <p>
+        诊断三件套：<code>node.log</code>（原生桥写的，含 env dump）、
+        <code>dsh-home/bridge-status.json</code>（<code>state / profile / port / pid / node / wasm</code>）、
+        <code>dsh-home/bridge.log</code>（bootstrap 自己的日志）。手机上没终端，这三份文件就是全部证据。
+      </p>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="host">
+      <h2><span class="no">02</span>宿主适配层：三段，职责不重叠</h2>
+
+      <h3>① ArkTS 侧编排 <span class="tag">NodeHost.ets:58</span></h3>
+      <p>
+        六步固定顺序：没有 key 直接失败 → 解包载荷 → 备目录 → 写 key 文件 → 投递 Node（九个环境变量）→ 连桥 + 握手。
+        没有 key 就提前失败是刻意的：不在没有凭据的情况下白跑一遍解包。
+      </p>
+
+      <h3>② 载荷物化 <span class="tag">Payload.ets:21</span></h3>
+      <p>
+        rawfile 里的 zip 不可寻址，Node 无法从中 <code>require</code>。所以分 1MiB 块复制进沙箱再
+        <code>zlib.decompressFile</code>；<strong>归档长度当幂等戳</strong>（<code>payload.stamp</code>），
+        载荷一更新自动重解，没变就零成本跳过。
+      </p>
+
+      <h3>③ Node 侧引导 <span class="tag">bootstrap.cjs:804</span></h3>
+      <p>
+        <code>main()</code> 铺十个垫片，<strong>顺序不能乱</strong>——因为 ESM 的具名导入是首次 import 时的快照，
+        晚一步补丁就落不到 <code>import { link } from 'node:fs/promises'</code> 上。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>十个垫片，按执行顺序</caption>
+          <thead>
+            <tr><th scope="col">#</th><th scope="col">垫片</th><th scope="col">治什么</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="num">1</td><td><code>rerouteConsole</code></td><td>stdout 只留给 JSON-RPC，console 全部改道日志文件</td></tr>
+            <tr><td class="num">2</td><td><code>installRequireBuiltinAlias</code></td><td>原生 addon 无 ohos 构建 → 别名到纯 JS 垫片</td></tr>
+            <tr><td class="num">3</td><td><code>installSharpStub</code></td><td>sharp 只有 darwin-arm64 / wasm32 → 原字节直通桩</td></tr>
+            <tr><td class="num">4</td><td><code>installLinkFallback</code></td><td>禁硬链接（EACCES）→ <code>copyFile(COPYFILE_EXCL)</code></td></tr>
+            <tr><td class="num">5</td><td><code>installDirSyncFallback</code></td><td>祖先 <code>/data</code> 只读 open 被拒 → 空壳 handle</td></tr>
+            <tr><td class="num">6–8</td><td>userfile 挂载三件套</td><td><code>/storage/Users/</code> 不支持 chmod/chown、FICLONE EPERM</td></tr>
+            <tr><td class="num">9</td><td><code>installProfileTemplate</code></td><td>按内容哈希把 <code>ohos</code> profile 装进 <code>$DSH_HOME/profiles</code></td></tr>
+            <tr><td class="num">10</td><td>acp → ohos 重映射</td><td>只有自定义 profile 能 insert 新行，patch 只能改/禁已有行</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        另有两个不靠补丁、靠模块替换的：<code>fetch-shim.cjs</code> 提供 jitless 下的纯 JS fetch，
+        并且<strong>连 <code>Headers / Response / Request / FormData</code> 全家族一起换</strong>——
+        dsh 启动期会读全局 <code>Headers</code>，只换 <code>fetch</code> 会触发 undici 的 WASM 惰性物化而崩。
+        <code>undici-esm.mjs</code> 拦 <code>await import('undici')</code>，因为那条路绕过 CJS resolve 钩子。
+      </p>
+
+      <h3>补丁是三份 YAML，不是一个开关</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th scope="col">文件</th><th scope="col">位置</th><th scope="col">能做什么</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>bundle patch</td>
+              <td><code>@ohos/dsh-bundle-ohos/cordis.patch.yml</code></td>
+              <td><strong>加行</strong>（<code>- insert:</code>）+ 禁用 stock 行；插件包还必须在 bundle 的 <code>dependencies</code> 里声明，否则永不 mount</td>
+            </tr>
+            <tr>
+              <td>平台 patch</td>
+              <td><a href="../host/patches/ohos.patch.yml">host/patches/ohos.patch.yml</a></td>
+              <td>只禁用「调用即失败」的行：pwsh / plugin-manager / office / bash / jobs</td>
+            </tr>
+            <tr>
+              <td>用户 patch</td>
+              <td><code>filesDir/patches/user.patch.yml</code></td>
+              <td>设置页能力开关 + 本地模型路由；<strong>后传覆盖前者</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note note--ok">
+        <span class="label">密钥不走 env</span>
+        <p>
+          原生桥启动时会把子进程环境 dump 进 <code>node.log</code>。所以 key 写成
+          <code>dsh-home/.api-key</code>（0600），只传路径 <code>DSH_KEY_FILE</code>，
+          由 bootstrap 在日志写完之后才赋给 <code>process.env.DEEPSEEK_API_KEY</code>。
+          新增任何敏感变量都沿用这个模式。
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="protocol">
+      <h2><span class="no">03</span>协议层：一条桥，两个 profile</h2>
+
+      <p>
+        传输只有一种：<code>127.0.0.1:4517</code> TCP，一行一帧 JSON-RPC 2.0。
+        bootstrap 把 socket 管进<strong>进程级</strong>的 <code>PassThrough</code>，再用
+        <code>Object.defineProperty</code> 覆盖 <code>process.stdin/stdout</code>
+        （Node 24 里这俩是 getter-only，直接赋值会抛）。两个刻意设计：
+      </p>
+      <ul>
+        <li><strong>首次连入才 boot dsh</strong> —— 保证 dsh 的 stdout 从第一帧起就有接收方，不会丢初始化输出。</li>
+        <li><strong>socket 断开只 pause 不 end</strong> —— stdin EOF 会被 dsh 当成 shutdown，UI 掉线不能杀运行时。</li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <caption>两个 profile 的差异（桥本身与 profile 无关）</caption>
+          <thead>
+            <tr><th scope="col"></th><th scope="col">SDK</th><th scope="col">ACP</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>方法</td>
+              <td>5 请求：<code>initialize</code> / <code>session/prompt</code> / <code>session/resume</code> / <code>session/working-directory/set</code> / <code>shutdown</code></td>
+              <td>9 方法：<code>initialize</code> + <code>session/new|list|resume|close|prompt|cancel|set_config_option</code></td>
+            </tr>
+            <tr>
+              <td>通知</td>
+              <td>4 个；<code>session.event</code> 是<strong>全运行时</strong>事件流，客户端按 sessionId 过滤</td>
+              <td><code>session/update</code> 五种 chunk</td>
+            </tr>
+            <tr>
+              <td>审批</td>
+              <td><strong>无通道</strong></td>
+              <td>服务端发起 <code>session/request_permission</code>，两键 <code>allow-once</code> / <code>reject-once</code>，fail-closed</td>
+            </tr>
+            <tr>
+              <td>流式</td>
+              <td>无（一步结束才发 <code>assistant/message</code>）</td>
+              <td>有（<code>agent_message_chunk</code> / <code>agent_thought_chunk</code>）</td>
+            </tr>
+            <tr>
+              <td>sessionId</td>
+              <td>客户端生成，未知 id 懒创建</td>
+              <td><strong>服务端生成</strong></td>
+            </tr>
+            <tr>
+              <td>取消</td>
+              <td>无</td>
+              <td><code>session/cancel</code> 是<strong>通知</strong>，带 id 发会 <code>Method not found</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>踩出来的硬契约</h3>
+      <p>以下每一条都是实测结论，写进注释就是契约本身（<a href="../entry/src/main/ets/model/AcpProtocol.ets">AcpProtocol.ets</a> 文件头）：</p>
+      <ul>
+        <li>事件信封 <code>{type, seq, time, data}</code>，<strong>字段在 <code>data</code> 下</strong>；读扁平结构 = 对话永远空列表。</li>
+        <li>帧必须带 <code>"jsonrpc":"2.0"</code>，缺失时预校验直接回 <code>-32600</code>，到不了方法分发。</li>
+        <li><code>set_config_option</code> 的 <code>model</code> value 是 <strong>JSON 数组字符串</strong>；响应里的 <code>configOptions</code> 是新的权威列表，而且<strong>选项集会收缩</strong>——默认模型一旦切走，该会话切不回来。</li>
+        <li><code>session/prompt</code> 在 inflight 时被拒 ⇒ <strong>ACP 没有 steering</strong>。「插话」只能是排队，或先 <code>cancel</code> 再发。</li>
+        <li>完全不答审批 ⇒ 那一轮<strong>无限挂起</strong>，不是工具失败；服务端不会自动放行。</li>
+        <li>方法名全部 snake_case，按 ACP 规范猜 camelCase 一律 <code>Method not found</code>。</li>
+      </ul>
+
+      <div class="note note--warn">
+        <span class="label">断线重连的语义陷阱</span>
+        <p>
+          断线时正在跑的那一轮，服务端继续跑，<code>session/update</code> 也会投给新连接；但
+          <strong>原 <code>session/prompt</code> 的响应永久丢失，且 update 帧里没有 turn id</strong>，
+          客户端无从判断它何时结束。所以恢复必须走重置语义：
+          <code>initialize</code> → <code>session/close</code> 掐掉孤儿轮 → <code>session/resume</code>
+          → 把那条消息标为「已中断」让用户决定是否重发。退避是 120s 起、翻倍、上限 300s、六次。
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="sandbox">
+      <h2><span class="no">04</span>沙箱：四层，而且没有一层是内核级进程沙箱</h2>
+
+      <p>
+        这是最容易被误解的一块。设备上真正拦住模型的不是「沙箱」这个词，而是<strong>文件路径收口 + 审批门</strong>；
+        内核级隔离那一层，在这里是缺席的。
+      </p>
+
+      <ol class="ladder">
+        <li class="is-hard">
+          <div class="head"><b>L0 系统应用沙箱</b><span class="badge hard">内核级</span></div>
+          <p>每个 App 一个 uid，只能碰 <code>/data/storage/el2/base/haps/entry/files/…</code>。这是唯一真正的安全边界。</p>
+        </li>
+        <li>
+          <div class="head"><b>L1 目录授权</b><span class="badge">系统授权</span></div>
+          <p>
+            用户用系统选择器挑目录，<code>FILE_ACCESS_PERSIST</code> + <code>fileShare.activatePermission()</code>
+            把授权持久化并暴露真实路径 <code>/storage/Users/currentUser/…</code>，Node 用普通 POSIX 调用就能读写；
+            父目录和兄弟目录仍 EPERM。
+          </p>
+        </li>
+        <li class="is-soft">
+          <div class="head"><b>L2 dsh 文件沙箱</b><span class="badge soft">进程内策略</span></div>
+          <p>
+            <code>dsh-fs-sandbox</code> 只栅住<strong>变更</strong>（write / edit / patch / delete / move），读一律放行。
+            <code>workspace-write</code> 要求目标 canonicalize 到<strong>会话 cwd</strong> 或平台临时目录，
+            否则抛 <code>FS_SANDBOX_DENIED</code>。
+          </p>
+        </li>
+        <li class="is-soft">
+          <div class="head"><b>L3 审批</b><span class="badge soft">策略</span></div>
+          <p>
+            <code>ask</code> / <code>never</code> 两档，由权限预设捆绑；ACP 下是 <code>session/request_permission</code>，
+            答错或空应答一律 fail-closed。SDK profile 下没有这条通道。
+          </p>
+        </li>
+      </ol>
+
+      <blockquote>
+        <p>
+          The fence is a policy check in TRUSTED code over a MODEL-CONTROLLED path,
+          <strong>NOT a kernel boundary</strong>. This is containment, not a security boundary.
+        </p>
+        <cite>dsh-fs-sandbox · src/index.ts</cite>
+      </blockquote>
+
+      <p>
+        那 <code>ctx.sandbox</code>（进程沙箱）呢？<code>dsh-sandbox-local</code> 在设备上必然
+        <code>SANDBOX_UNAVAILABLE</code>——它的后端是 bwrap / landlock-run / Seatbelt / Windows ACL，
+        <strong>每一个都要 spawn</strong>。这也正好和「bash 整族被禁」自洽：没有 shell，就没有需要内核沙箱去关的东西。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>权限三档：沙箱与审批捆绑，启动期固化</caption>
+          <thead>
+            <tr><th scope="col">档位</th><th scope="col">文件变更</th><th scope="col">审批</th><th scope="col">真机表现</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>read-only</td>
+              <td>全部拒绝</td>
+              <td>ask</td>
+              <td>裸写先被沙箱拒（无审批请求）；带 <code>sandbox_permissions</code> 重试才触发审批</td>
+            </tr>
+            <tr>
+              <td>workspace-write（默认）</td>
+              <td>工作区内直写</td>
+              <td>ask</td>
+              <td>越区才问</td>
+            </tr>
+            <tr>
+              <td>danger-full-access</td>
+              <td>不栅</td>
+              <td>never</td>
+              <td>全放行、零审批</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        档位由 <code>DSH_PERMISSION_MODE</code> 在<strong>启动期</strong>固化，会话创建时写进
+        <code>permission/preset</code>、<code>sandbox/mode</code>、<code>approval/policy</code> 三条事件
+        ⇒ <strong>切档要重启 App，且只影响新会话</strong>。
+      </p>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="constraints">
+      <h2><span class="no">05</span>平台约束：六条老账，四条实测补的</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th scope="col">约束</th><th scope="col">后果</th><th scope="col">对策</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>禁 fork/exec</td><td>无 git / rg / bash、无 PTY、无包管理</td><td>同进程 Node；纯 JS 搜索 + in-process PTC</td></tr>
+            <tr><td><code>node::Start</code> 一次</td><td>崩溃即终态</td><td>UI 明示重启；<code>bridge-status</code> + 崩溃记录</td></tr>
+            <tr><td>JIT 需受限 ACL</td><td>不申请就 SIGTRAP</td><td>默认 <code>--jitless</code>，零受限权限可装</td></tr>
+            <tr><td>jitless ⇒ 无 WASM</td><td>undici/llhttp、TS 擦除、sharp 全废</td><td>fetch-shim + undici 别名 + sharp 桩 + 明示写纯 JS</td></tr>
+            <tr><td>原生 <code>.node</code> 须自身签名域</td><td>koffi 等不可用</td><td><code>npm install --ignore-scripts</code>，源头不打进载荷</td></tr>
+            <tr><td>禁 hardlink</td><td>dsh 的 <code>link tmp→final</code> 原子发布失败</td><td><code>copyFile(COPYFILE_EXCL)</code> 降级</td></tr>
+            <tr><td>沙箱只认 app files 根以下</td><td>祖先目录 open EACCES ⇒ 内联图片报「unable to persist」</td><td>只读 open 目录给空壳 handle</td></tr>
+            <tr><td>userfile 挂载非 POSIX</td><td>chmod / chown EPERM、FICLONE EPERM</td><td>三条 mount-aware 降级</td></tr>
+            <tr><td><code>cwd</code>=<code>/</code>、<code>execPath</code>=appspawn</td><td>依赖这两者的库静默出错</td><td>宿主注入 <code>HOME</code> / <code>TMPDIR</code>，沙箱根用会话 cwd</td></tr>
+            <tr><td>单 HAP 三形态</td><td>手机 / 平板 / 2in1 共用</td><td>840vp 断点：窄屏单栏，宽屏「会话栏 + 对话」</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="tradeoffs">
+      <h2><span class="no">06</span>架构取舍：十条，每条都标清代价</h2>
+
+      <p>这些不是「设计偏好」，每一条都是在平台上没有第二条路时做的交换。读的时候先看「付了」那一行。</p>
+
+      <div class="tradeoffs">
+
+        <div class="tradeoff">
+          <h3>同进程，而不是子进程</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd><strong>零 fork</strong>、零端口暴露、零安装外部二进制。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd><strong>崩溃即终态</strong>、无进程级隔离、必须劫持 stdio、每进程只能起一次。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>回环 TCP 当 stdio</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>协议就是 dsh 自己的协议——<strong>零改动</strong>，还能用 <code>hdc fport</code> 从外部探针驱动。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd>单客户端（新连接顶掉旧连接）、重连语义要自己扛、多一次拷贝。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>自定义 <code>ohos</code> profile，而不是改 dsh 源码</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>可以随 dsh 升级，平台差异全部可回滚。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd>装配链复杂（bundle 依赖闭包不声明就永不 mount，踩过）；升级要复核行 id。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>纯 JS 重写搜索 / PTC，而不是禁用</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>agent 不降智——它不会反复试 bash 然后失败三次。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd>370 行插件、性能上限、contain 检查要自己维护。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>jitless，而不是申请 JIT ACL</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>普通应用直接装，AGC 不必走受限权限审批。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd><strong>WebAssembly 全废</strong>——这一条决定了 fetch 垫片、TS 不可用、图片只能原字节上传。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>沙箱下沉到 fs 层 + 审批</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>手机上有可用、可解释、可展示给用户的边界。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd>containment 不是 security boundary：模型若从别的 seam 越界，没有第二道闸。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>工具面做减法（bash / jobs / pwsh 整族禁掉）</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>模型第一轮就走对路，不烧 token 在注定失败的工具上。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd>能力清单的永久缺口：编译、PTY、git 二进制都没有。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>协议双轨（SDK / ACP）</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>渐进迁移，旧路径随时可退。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd>两套客户端、两套语义、口径极易漂——见下一节。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>客户端反推投影（待办 / 目标 / 用量）</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>零协议改动；官方 ACP README 明确 cards / plans / todos <strong>不在 ACP 里</strong>。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd>只读、有损、依赖工具参数形状。</dd></div>
+          </dl>
+        </div>
+
+        <div class="tradeoff">
+          <h3>240MB 载荷随 HAP 分发</h3>
+          <dl>
+            <div class="pair gain"><dt>换到</dt><dd>离线自足、无下载器、无版本协商。</dd></div>
+            <div class="pair cost"><dt>付了</dt><dd>包体、首启解包时间、升级即整包替换。</dd></div>
+          </dl>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="drift">
+      <h2><span class="no">07</span>口径冲突：三处文档与代码对不上</h2>
+
+      <p>
+        这一节不是风格问题，是这轮读代码发现的实际问题。按「代码为准」列出，并给出建议。
+      </p>
+
+      <div class="conflict">
+        <h3>① 默认 profile：代码是 SDK，两份文档说 ACP</h3>
+        <p>
+          <a href="../entry/src/main/ets/common/AppConfig.ets">AppConfig.ets</a>:51 默认 <code>'sdk'</code>，
+          设置页按钮也写「SDK（默认）」；而 <a href="../docs/API-AND-SEQUENCE.md">API-AND-SEQUENCE.md</a> §2.1
+          写「ACP（默认路径）」，AGENTS.md §9 也注「实际默认 ACP」。
+        </p>
+        <p class="verdict"><b>以代码为准：全新安装跑的是 SDK。</b></p>
+      </div>
+
+      <div class="conflict">
+        <h3>② 这不只是口径问题，是能力问题</h3>
+        <p>
+          <a href="../host/bootstrap.cjs">bootstrap.cjs</a>:743 的 <code>installProfileTemplate()</code>
+          只在 <code>PROFILE === 'acp' | 'ohos'</code> 时才装模板。所以 SDK 默认路径下<strong>整套 ohos 插件都不挂</strong>：
+        </p>
+        <ul>
+          <li>纯 JS 搜索不挂 ⇒ stock <code>tool-fs-search</code> 走 spawn ripgrep ⇒ <strong>glob / grep 在默认配置下是坏的</strong>；</li>
+          <li><code>credentials-live</code> 不挂 ⇒ 改密钥要重启（代码里 toast 就是这么分叉的）；</li>
+          <li><code>boot-report</code> 不挂 ⇒ 手机上没有任何工具表自检；</li>
+          <li><code>time-context</code> 不挂 ⇒ 模型不知道「今天」；</li>
+          <li>无审批通道、无流式。</li>
+        </ul>
+        <p class="verdict">
+          <b>换句话说：「默认」是兼容历史的降级路径，「完整体验」要用户自己去设置里切 ACP 再重启。</b>
+          要么把默认翻成 ACP，要么在首启时引导一次——这是产品决策，不是 bug。
+        </p>
+      </div>
+
+      <div class="conflict">
+        <h3>③ 小口径漂移</h3>
+        <p>
+          AGENTS.md 术语表说 native 工具表 21 个，§7 实测是 25 个（0.2.2 白送了
+          <code>workflow</code> / <code>team_task_*</code> / <code>read_image</code> / <code>wait_agent</code> 等），
+          载荷实际已是 0.2.2-rc.5；<a href="../docs/ARCHITECTURE.md">ARCHITECTURE.md</a>
+          把 SDK 写成主路径且没有 ohos profile / 审批；<a href="../docs/BOOT.md">BOOT.md</a>
+          的行号整体漂了（bootstrap 现在 850 行，<code>main()</code> 在 804 不是 789）。
+        </p>
+        <p class="verdict"><b>建议：改代码默认值的同时，同 commit 修这三份文档，避免下一轮 agent 又被旧口径带偏。</b></p>
+      </div>
+
+      <div class="note">
+        <span class="label">本文与旧文档的关系</span>
+        <p>
+          本文是「四层 + 取舍」的一页综述，不替代
+          <a href="../docs/BOOT.md">BOOT.md</a> 的逐行走读、
+          <a href="../docs/SPIKE-ACP.md">SPIKE-ACP.md</a> 的 ACP 实测矩阵、
+          <a href="../docs/GAP-ANALYSIS.md">GAP-ANALYSIS.md</a> 的能力差距清单。
+          三者的结论冲突时，以本文标注的代码行号为准。
+          想知道这些设计里哪些是硬啃下来的、代价是什么，看
+          <a href="BREAKTHROUGHS.md">突破清单</a>（排版版 <a href="breakthroughs.html">breakthroughs.html</a>）。
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ 8 ============ -->
+    <section id="verify">
+      <h2><span class="no">08</span>怎么验证：手机上没有终端，只有日志</h2>
+
+      <div class="table-wrap">
+        <table>
+          <caption>设置 → 诊断面板读的就是这三份文件</caption>
+          <thead>
+            <tr><th scope="col">现象</th><th scope="col">看哪里</th><th scope="col">关键字</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>卡在「启动内嵌 Node 运行时」</td>
+              <td><code>filesDir/node.log</code></td>
+              <td>原生桥的 env dump、<code>[node_bridge]</code></td>
+            </tr>
+            <tr>
+              <td>卡在「连接本地桥」</td>
+              <td><code>dsh-home/bridge-status.json</code></td>
+              <td><code>state</code> / <code>error</code> / <code>wasm</code></td>
+            </tr>
+            <tr>
+              <td>卡在「握手」</td>
+              <td><code>dsh-home/bridge.log</code></td>
+              <td><code>boot: …</code> 与 <code>boot failed:</code>，失败文案带 <code>stage=</code></td>
+            </tr>
+            <tr>
+              <td>起来了但工具不对</td>
+              <td><code>dsh-home/bridge.log</code></td>
+              <td><code>[boot-report] tools(25): …</code> 与 <code>web: search=auto (deepseek-official for deepseek-official)</code></td>
+            </tr>
+            <tr>
+              <td>图片发不出去</td>
+              <td><code>dsh-home/bridge.log</code></td>
+              <td><code>sharp-stub:</code> 与 <code>fsync dir fallback</code></td>
+            </tr>
+            <tr>
+              <td>密钥没生效</td>
+              <td><code>dsh-home/bridge.log</code></td>
+              <td><code>[credentials-live] watching …</code>（没有这行 = 走的 SDK 路径）</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        装机前先在本地过一遍三段验证（<code>bash scripts/test.sh</code>：载荷单测 + ArkTS 检查 + LocalUnit + 设备端 ohosTest）。
+        改 <code>host/</code> 下任何东西——包括那几个 YAML——都必须先重跑
+        <code>node scripts/assemble-payload.mjs</code> 再 build；只有设置页生成的
+        <code>user.patch.yml</code> 是运行期写的，不用重装。
+      </p>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>
+      依据 <code>3f12dcb</code>（2026-11-19）的代码实测整理，2026-11-20 成文。
+      口径来源：AGENTS.md §2–§7、<code>host/</code> 与 <code>entry/src/main/ets/</code> 源码、载荷内 dsh 0.2.2-rc.5 的包描述与注释。
+    </p>
+    <p>
+      单文件、无外部依赖、可离线打开；打印样式已备（隐藏目录与主题开关，章节分页）。
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.querySelector('[data-theme-toggle]');
+  var KEY = 'dsh-arch-theme';
+
+  function systemDark() {
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { return false; }
+  }
+
+  function current() {
+    return root.getAttribute('data-theme') || (systemDark() ? 'dark' : 'light');
+  }
+
+  function paint() {
+    if (!btn) return;
+    var dark = current() === 'dark';
+    btn.textContent = dark ? '浅色' : '深色';
+    btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+  }
+
+  try {
+    var saved = window.localStorage.getItem(KEY);
+    if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+  } catch (e) { /* private mode */ }
+  paint();
+
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var next = current() === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { window.localStorage.setItem(KEY, next); } catch (e) { /* ignore */ }
+      paint();
+    });
+  }
+
+  var links = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
+  var byId = {};
+  links.forEach(function (a) {
+    var id = (a.getAttribute('href') || '').replace('#', '');
+    if (id) byId[id] = a;
+  });
+  function mark(id) {
+    links.forEach(function (a) { a.removeAttribute('aria-current'); });
+    if (byId[id]) byId[id].setAttribute('aria-current', 'true');
+  }
+
+  var sections = Array.prototype.slice.call(document.querySelectorAll('main section[id]'));
+  var seen = {};
+  function refresh() {
+    for (var i = 0; i < sections.length; i++) {
+      if (seen[sections[i].id]) { mark(sections[i].id); return; }
+    }
+  }
+
+  /* Deterministic initial state: the first section, not whichever entry fired last. */
+  if (sections.length) mark(sections[0].id);
+
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) seen[entry.target.id] = true;
+        else delete seen[entry.target.id];
+      });
+      refresh();
+    }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
+    sections.forEach(function (s) { io.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>

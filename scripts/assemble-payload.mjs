@@ -18,9 +18,14 @@
  *   patches/             profile patch YAMLs (platform + user capability toggles)
  *
  * Usage:
- *   node scripts/assemble-payload.mjs                # install + pack
+ *   node scripts/assemble-payload.mjs                # install the pinned version + pack
  *   node scripts/assemble-payload.mjs --skip-install  # repack existing staging
- *   node scripts/assemble-payload.mjs --dsh-version 0.2.1-rc.4
+ *   node scripts/assemble-payload.mjs --dsh-version 0.2.2-rc.6   # explicit override
+ *
+ * The version is PINNED, not `latest`: this tree is the single source of the
+ * AI capability, so a rebuild must never silently swap the brain. Bumping it
+ * is a deliberate change that carries the doc updates (AGENTS.md §2/§6/§7,
+ * tool table, search provider) and a fresh three-stage validation with it.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -37,9 +42,12 @@ const STAGING = resolve(ROOT, stagingIndex >= 0 ? args[stagingIndex + 1] : '.bui
 const OUT = join(ROOT, 'entry', 'src', 'main', 'resources', 'rawfile', 'dsh-payload.zip')
 const HOST_DIR = join(ROOT, 'host')
 
+/** Pinned dsh version shipped in the payload. See the header for the policy. */
+const PINNED_DSH_VERSION = '0.2.2-rc.5'
+
 const skipInstall = args.includes('--skip-install')
 const versionIndex = args.indexOf('--dsh-version')
-const dshVersion = versionIndex >= 0 ? args[versionIndex + 1] : 'latest'
+const dshVersion = versionIndex >= 0 ? args[versionIndex + 1] : PINNED_DSH_VERSION
 
 function run(command, commandArgs, cwd) {
   process.stdout.write(`$ ${command} ${commandArgs.join(' ')}\n`)

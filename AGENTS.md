@@ -19,7 +19,7 @@
 
 | 术语 | 定义 | 锚点 |
 |---|---|---|
-| **dsh** | 唯一的「大脑」：npm 包 `@deepseek-ai/dsh`（**0.2.2-rc.3**，依赖树 **676 包**，npm install 实测 added 计数）。会话、工具调用、插件、模型适配、持久化全部来自它；本仓库不含任何 AI 能力 | 载荷内 node_modules |
+| **dsh** | 唯一的「大脑」：npm 包 `@deepseek-ai/dsh`（**0.2.2-rc.5**，依赖树 **676 包**，npm install 实测 added 计数）。会话、工具调用、插件、模型适配、持久化全部来自它；本仓库不含任何 AI 能力 | 载荷内 node_modules |
 | **Harness / 外壳** | 本仓库自身：ArkUI 界面 + 宿主适配层 | 本仓库 |
 | **Payload / 载荷** | `dsh-payload.zip`（≈156MB）：dsh 及其依赖打进 HAP rawfile，首启解包到沙箱 | `scripts/assemble-payload.mjs`、`entry/.../host/Payload.ets` |
 | **Bridge / 桥** | 127.0.0.1:4517 回环 TCP，承载 newline-delimited JSON-RPC 2.0；bootstrap 把 socket 伪装成 dsh 的 stdio。**单客户端**：新连接 `replacing previous client` 顶掉旧连接 | `host/bootstrap.cjs`、`entry/.../model/DshClient.ets` |
@@ -37,7 +37,7 @@
 | **ptc-runtime-vm / run_code** | in-process PTC 运行时（`@ohos/dsh-ptc-runtime-vm`，worker_threads + `node:vm`，随载荷分发）：**`tools.mode` 在 0.2.2 已被删除**（schema 变 `z.never()`，写它直接启动失败）；改由 `tool-executor-native` 行承担，base 默认挂载、`tool-executor-ptc` 默认禁用（2026-11-15 升级实测）。**native 下模型工具表 21 个直出工具（glob/grep/read/write/web_search/web_fetch/edit/skill/subagent/todo_write 等），`run_code` 不在其中**——dsh-tools 只在非 native 模式把 run_code 注入可见表（`dsh-tools/lib/index.js` view()：`mode !== "native"` 才 `visible.set(RUN_CODE_NAME)`）；`mode: ptc` 则反过来：wire 上**只有 run_code**（wireSchemas 过滤掉其余 schema），其余工具只能经程序内 `tools.*` SDK。boot-report 的 `tools(N)` 用 `ctx.tools.schemas()`（注册表视图），ptc 模式下计 22（全部 + run_code），native 下计 21。ptc-runtime-vm 仍挂载（提供 `ctx.ptcRuntime`），未来 preset 可经 `dsh-agent-tool-presentation` 行（`tool-presentation`，preset 级 `presentAs`）opt-in PTC；worker 不可用时优雅 `worker-exit` | `host/profile-ohos/.../@ohos/dsh-ptc-runtime-vm`、`.build/payload/node_modules/@deepseek-ai/dsh-tools/lib/index.js` |
 | **credentials-live / 密钥热更新** | `@ohos/dsh-credentials-live`（随载荷分发，ohos profile 专属）：目录级 fs.watch + 1.5s 轮询 `<dsh-home>/.api-key`，变化经 `credentials.set()/unset()` 热发布。dsh 启动期冻结 env 快照（`loadLayeredEnv` 拷 `process.env`），运行中改 env 永远无效——这是唯一热路径；Settings 保存密钥 ~2s 生效无需重启（ACP 路径；SDK profile 无此插件，重启生效） | `host/profile-ohos/.../@ohos/dsh-credentials-live` |
 | **time-context / 时间上下文** | `@deepseek-ai/dsh-time-context`（dsh 自带、随载荷分发）：把当前时间作为 durable 注入写进请求历史（默认 10 分钟一次），模型据此知道"今天"。**它不是工具**，桌面/SDK profile 由 `dsh-sdk-app` 挂载，`dsh-acp-app` 不含 → ohos bundle 自己 insert 一行；缺它时模型对相对日期的推理全是猜 | `@ohos/dsh-bundle-ohos/cordis.patch.yml` |
-| **boot-report / 能力自检** | `@ohos/dsh-boot-report`（ohos profile 专属）：启动 5s 后把已注册工具名与 `ctx.web.searchReady()/fetchReady()` 写进 `bridge.log`。手机没有终端，`web` 用 `ctx.get('web')` 而非 inject 读取，seam 整体缺失时也要报出来 | `host/profile-ohos/.../@ohos/dsh-boot-report` |
+| **boot-report / 能力自检** | `@ohos/dsh-boot-report`（ohos profile 专属）：启动 5s 后把已注册工具名与 web search/fetch 就绪写进 `bridge.log`。就绪由 provider 注册表推导（该 dsh **没有** `searchReady()/fetchReady()`）：配置 id 优先 → 按 `dsh-web` 的**路由偏好**（DeepSeek 路由 → `deepseek-official`，其它 → `deepseek-search-api`）→ 最后才是「唯一可用」。0.2.2-rc.5 起基础组合不再钉 `searchProvider`，所以**两个 provider 可用不再算歧义**，按偏好判定即可。`web` 用 `ctx.get('web')` 而非 inject 读取，seam 整体缺失时也要报出来 | `host/profile-ohos/.../@ohos/dsh-boot-report` |
 
 ### 2.1 英文口径（对外文案用，勿自创）
 
@@ -162,12 +162,12 @@ ACP 实测契约（勿凭直觉改）：
 
 - **内嵌运行时 Node = v24.2.0**（libnode.so，设备端 `bridge-status.json` 的 `node` 字段）。
 - **本地装配/同构测试 Node = 22.22.2**（macOS 侧，见 `scripts/deploy.sh` 的 PATH）。两个数字并存，不是笔误。
-- dsh **0.2.2-rc.3**；载荷 zip ≈**240MB**（剪掉 332MB 外国平台包后）；HAP ≈352MB（unsigned）；桥端口 4517。
+- dsh **0.2.2-rc.5**（钉在 `scripts/assemble-payload.mjs` 的 `PINNED_DSH_VERSION`，**默认不再解析 `latest`**）；载荷 zip ≈**240MB**（剪掉 332MB 外国平台包后）；HAP ≈352MB（unsigned）；桥端口 4517。
 - `hdc` 不在 PATH：`/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc`。
 - 设备侧文件路径两种视角同目录：hdc shell `/data/app/el2/100/base/<bundle>/haps/entry/files/…`
   ⇄ App 内 `/data/storage/el2/base/haps/entry/files/…`（`context.filesDir`）。
 
-## 7. 当前状态（2026-10-27）
+## 7. 当前状态（2026-11-20）
 
 - 已交付并真机验证：冷启动恢复、会话 resume、文件预览（网页/图片/文本）、能力开关、
   项目分类（创建/切换真机验证，每项目独立 workspace）。
@@ -394,6 +394,24 @@ ACP 实测契约（勿凭直觉改）：
   no-op、由服务端自己下采样，代价只是上传变大；WebP/PNG/TIFF/GIF 仍 fail-closed（其字节不能冒充 JPEG）。
   本地验证：同一张 1320×2848 图 `readRequestImageFile` 从 `SharpStubError` 变为直通；ACP 端到端（无效 key）
   已到达服务端并返回 401 鉴权错误，不再是 TRANSPORT。单测 17/17。
+- **dsh 升到 0.2.2-rc.5（2026-11-20，本地闭环，真机待验）**：从 rc.3 只隔两个补丁级 RC。
+  逐包 diff 后**真正改动的代码只有三处**：①`dsh-web` / `dsh-web-search-deepseek`——搜索提供方
+  改为按模型路由自动选，DeepSeek 路由走服务端 Messages 搜索（不按次收费、按 token 计费），
+  端点固定 `https://api.deepseek.com/anthropic/v1`、**不跟随 provider baseURL**；②`dsh-llm-deepseek`
+  ——新增 `stop_reason: 'refusal'` → `CONTENT_REFUSED`（先报已耗 token 再抛）；③
+  `dsh-session-persistence-jsonl/lib/worker.cjs`——错误码表加一项。其余 13 个直接依赖的包
+  **只动了 `package.json` 版本号**。组合配置 diff 只有一行：`web.searchProvider` 消失。
+  包数 676 不变、工具表 25 不变、ACP 9 方法不变（`dsh-acp` 只改版本号）。载荷 zip **240MB**。
+  **boot-report 同步修**：`describeCapability()` 原来只做「配置优先 / 唯一可用」，rc.5 下两个
+  provider 可用就误报 `search=ambiguous`；现按 `dsh-web` 的路由偏好判定（`preferredSearchProvider()`，
+  路由取自 `ctx.get('agentDefaultModel').currentSelection().provider`），输出
+  `search=auto (deepseek-official for deepseek-official)`。单测 11 → 20。
+  **版本钉死**：`assemble-payload.mjs` 的 `PINNED_DSH_VERSION = '0.2.2-rc.5'`，默认不再解析 `latest`
+  （此前重打载荷会在不知情下换大脑）。
+  本地验证：四组载荷单测 38 / 22 / 8 / 20（ptc 另跑 `--jitless` 22/22）+ `--dump-config`
+  （12 行 disabled、5 行 insert 命中、`web` 行只剩 `fetchProvider`）+ 冒烟（`tools(25)`、
+  `search=auto (…)`）+ `bash scripts/test.sh arkts local` 全绿（46 个文件 / LocalUnit 通过）。
+  **真机未验**：重装后需确认一次真实 `web_search` 走服务端搜索能返回结果。
 
 签名口径（开源卫生）：
 
@@ -492,6 +510,7 @@ ACP 实测契约（勿凭直觉改）：
 |---|---|
 | `docs/API-AND-SEQUENCE.md` | **接口清单 + 时序图**：能力域总览（42 文件 / 15.4k 行）、ACP 9 方法与 SDK 5 方法签名、内部模块导出符号表、6 张 mermaid 时序图（冷启动 / 一轮对话 / 审批 / 断线重连 / LAN 直连 / 语音降级）、文档缺口清单 |
 | `docs/ARCHITECTURE.md` | 架构图、协议面、事件渲染表、平台约束。**协议面已过时**（把 SDK 写成主路径，实际默认 ACP）——读协议请看 `API-AND-SEQUENCE.md` §2.1 与 `SPIKE-ACP.md` |
+| `docs/BREAKTHROUGHS.md` | **突破清单 + 代价**：四条判据（平台说不行/无方案可抄/真机闭环/用户可感知）筛出的六件平台级突破——同进程 Node、进程内 ACP、jitless fetch、自定义 profile、三条降级链、可观测性，每件带证据与代价；另含协议契约、方法论、以及诚实的「什么不算突破」。排版版 `docs/breakthroughs.html`（与 `docs/on-device-architecture.html` 同一套设计，后者讲「现在长什么样」，前者讲「哪些是硬啃下来的」） |
 | `docs/BOOT.md` | **启动链路走读**：点开图标 → EntryAbility → NodeHost.boot → dlopen/node::Start → bootstrap.cjs 十个垫片 → runCli/profile 挂载；含「哪些脚本在什么时候跑」的分类表与 6 个文件的阅读顺序 |
 | `docs/BUILD.md` | 构建、签名、装机、排障（含受限环境坑） |
 | `docs/ROADMAP.md` | 路线图：ACP 切换评估（流式/审批/取消）等 |
