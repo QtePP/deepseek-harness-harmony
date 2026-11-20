@@ -12,6 +12,15 @@
 
 ---
 
+- **平板重装新载荷（2026-11-20 14:56，MatePad Mini / tablet）**：`assemble-payload` 重打后 zip
+  **239,893,674 B**（+17.3KB；相对上一份的唯一变化是 `glob` 描述与新增的 `docs/STATUS.md`），
+  `deploy.sh` 覆盖安装直接成功——**签名没再轮换，所以没有 `9568332`**；安装保留数据 ⇒
+  **没有首启提问**（`profile_prompted` 仍在）。解包后逐项核对：`payload.stamp` = 新长度；
+  `payload/docs` = **18 个**（含 STATUS.md）；设备上 `dsh-tool-fs-search-js/index.js` 已含新描述；
+  `bridge-status.json` 仍 `profile: ohos` / `node: v24.2.0` / `wasm: false`；`bridge.log` 给
+  **`tools(26)`（含 `git`）** 与 `search=auto (deepseek-official for deepseek-official)`。
+  界面实拍：双栏成立，上一轮 git 会话原样还在（轨迹条「有失败 · 9 步 · 17.0s」就是那次超时重试）。
+
 - 已交付并真机验证：冷启动恢复、会话 resume、文件预览（网页/图片/文本）、能力开关、
   项目分类（创建/切换真机验证，每项目独立 workspace）。
 - **聊天体验对齐 dsh-go（2026-11-12，纯客户端，无协议改动）**：①**插话队列**——跑动中发送
