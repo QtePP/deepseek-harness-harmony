@@ -361,6 +361,36 @@ export function parseInlines(raw: string): MdSpan[] {
   return out
 }
 
+/** One tappable target inside a block's inline content. */
+export class MdLink {
+  text: string = ''
+  url: string = ''
+}
+
+/**
+ * Every distinct link in one block, in reading order.
+ *
+ * ArkUI's `Span` has no click handler and no span hit-testing (`Text` only
+ * reports a click for the whole run), so a tap can only target the block.
+ * Collecting the links here lets the tap either open the single target or ask
+ * which of several the reader meant.
+ */
+export function linksOf(raw: string): MdLink[] {
+  const out: MdLink[] = []
+  const seen: Set<string> = new Set<string>()
+  for (const span of parseInlines(raw)) {
+    if (span.link.length === 0 || seen.has(span.link)) {
+      continue
+    }
+    seen.add(span.link)
+    const link = new MdLink()
+    link.url = span.link
+    link.text = span.text
+    out.push(link)
+  }
+  return out
+}
+
 /** One lexed fragment of a fenced code block. */
 export class CodeToken {
   text: string = ''
@@ -572,6 +602,59 @@ struct InlineText {
   @Prop strongAll: boolean = false
   @Prop muted: boolean = false
 
+  /**
+   * Open one URL in the system browser.
+   *
+   * Links used to render blue and underlined and do nothing when tapped: the
+   * parser kept the URL, the renderer only styled it. `openLink` throws when
+   * no browser can take the scheme, so the failure becomes a toast instead of
+   * a dead tap.
+   */
+  private openExternal(url: string): void {
+    let context: common.UIAbilityContext | null = null
+    try {
+      context = this.getUIContext().getHostContext() as common.UIAbilityContext
+    } catch (error) {
+      context = null
+    }
+    if (context === null || context === undefined) {
+      return
+    }
+    context.openLink(url).catch((error: BusinessError) => {
+      this.getUIContext().getPromptAction().showToast({
+        message: `无法打开链接（${error.code}）`,
+        duration: 2500
+      })
+    })
+  }
+
+  /** A tap anywhere in the run: one link opens, several ask which. */
+  private onTap(): void {
+    const links = linksOf(this.content)
+    if (links.length === 0) {
+      return
+    }
+    if (links.length === 1) {
+      this.openExternal(links[0].url)
+      return
+    }
+    const buttons: AlertDialogButtonOptions[] = []
+    for (let index = 0; index < links.length && index < 3; index++) {
+      const link = links[index]
+      const label = link.text.length > 0 ? link.text : link.url
+      buttons.push({
+        value: label.length > 22 ? `${label.substring(0, 22)}…` : label,
+        action: () => this.openExternal(link.url)
+      })
+    }
+    buttons.push({ value: '取消', action: () => {} })
+    this.getUIContext().showAlertDialog({
+      title: '打开链接',
+      message: '这段文字里有多个链接',
+      buttons: buttons
+    })
+  }
+
   build() {
     Text() {
       ForEach(parseInlines(this.content), (span: MdSpan, index: number) => {
@@ -588,6 +671,7 @@ struct InlineText {
     .fontSize(scaled(this.baseSize, this.fontScale))
     .lineHeight(scaled(this.lineH, this.fontScale))
     .wordBreak(WordBreak.BREAK_ALL)
+    .onClick(() => this.onTap())
   }
 }
 
