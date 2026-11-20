@@ -1305,11 +1305,11 @@
       <div class="conflict">
         <h3>③ 小口径漂移</h3>
         <p>
-          AGENTS.md 术语表说 native 工具表 21 个，§7 实测是 25 个（0.2.2 白送了
-          <code>workflow</code> / <code>team_task_*</code> / <code>read_image</code> / <code>wait_agent</code> 等），
-          载荷实际已是 0.2.2-rc.5；<a href="../docs/ARCHITECTURE.md">ARCHITECTURE.md</a>
-          把 SDK 写成主路径且没有 ohos profile / 审批；<a href="../docs/BOOT.md">BOOT.md</a>
-          的行号整体漂了（bootstrap 现在 850 行，<code>main()</code> 在 804 不是 789）。
+          工具数曾同时存在 21 与 25 两个口径（21 是 0.2.1 的数），载荷升到 0.2.2-rc.5 后已统一为
+          <strong>25</strong>；<a href="../docs/ARCHITECTURE.md">ARCHITECTURE.md</a> 已在 2026-11-20 重写
+          （不再把 SDK 写成主路径，补上了 ohos profile 与审批）。
+          仍然漂着的是 <a href="../docs/BOOT.md">BOOT.md</a> 的行号（bootstrap 现在 850 行，
+          <code>main()</code> 在 804 不是 789）——读它时按函数名找，别按行号。
         </p>
         <p class="verdict"><b>建议：改代码默认值的同时，同 commit 修这三份文档，避免下一轮 agent 又被旧口径带偏。</b></p>
       </div>
@@ -1317,6 +1317,7 @@
       <div class="note">
         <span class="label">本文与旧文档的关系</span>
         <p>
+          权威文本：<a href="ARCHITECTURE.md">docs/ARCHITECTURE.md</a>（本页是它的排版版，改内容先改那里）。
           本文是「四层 + 取舍」的一页综述，不替代
           <a href="../docs/BOOT.md">BOOT.md</a> 的逐行走读、
           <a href="../docs/SPIKE-ACP.md">SPIKE-ACP.md</a> 的 ACP 实测矩阵、

@@ -245,7 +245,7 @@ scripts/               # 载荷装配、一键部署
 | 文档 | 内容 |
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构图、协议面、事件渲染表 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构权威文本：进程剖面、双 profile 协议面、沙箱四层、平台约束（附排版版 [HTML](docs/on-device-architecture.html)） |
 | [BREAKTHROUGHS.md](docs/BREAKTHROUGHS.md) | 六件平台级突破与它们的代价（附排版版 [breakthroughs.html](docs/breakthroughs.html)） |
 | [BUILD.md](docs/BUILD.md) | 构建、签名、装机、排障 |
 | [GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md) | 与桌面版的能力差距及根因 |
