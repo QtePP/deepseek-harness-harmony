@@ -12,6 +12,31 @@
 
 ---
 
+- **`git` 工具真机第二轮：又两个缺陷，其中一个是「上一轮修错了」（2026-11-20 15:22，MatePad Mini）**。
+  把上一轮的三条文案改进重新部署后再让模型跑一遍，并从设备会话日志（`session.v4.jsonl.zstd`）取**原始
+  返回文本**核对，不只看模型复述：
+  - 三条文案确实变了（`diff` → `GIT_NO_HISTORY` 带根因；`pull` → 指明 `snapshot` + `force=true`；
+    `clone` 已存在 → 同样指向 `force`），`log limit=3` 仍返回 `1 commit … 228436f`。
+  - **新缺陷 1：文案让模型「删掉再重跑」，但设备上没有删目录的手段。** 26 个工具里没有 `rm`、没有
+    `bash`、没有 shell——模型做不到，用户也做不到，而我们自己写的话把死路说成了出路。修法：`git`
+    工具自己加 `force` 开关（它建的目录它自己删），三条文案全部改指 `force=true`。
+  - **新缺陷 2（严重，上一轮改错的正是它）：`diff` 的默认 `HEAD~1` 在任何仓库上都不成立**，不是只有
+    depth-1 快照。本地 `--jitless` 探针在 **128 个 commit 的全量 clone** 上直接证明：
+    `isomorphic-git` 的 `resolveRef` **根本不实现 ancestry 语法**——`HEAD~1`、`HEAD^` 都抛
+    `NotFoundError`；同一条提交用 oid 或 `main` 都能解析。也就是说上一轮「提前报 GIT_NO_HISTORY、
+    建议 clone 全量历史」的诊断和建议**双双错误**：全量 clone 照样失败。
+    修法：自己走父链（`resolveRev`），并**逐步校验父提交真的在对象库里**——shallow clone 的 commit
+    对象**仍记录父 oid，但父本身不在库里**（实测 `parent NOT in object store: NotFoundError`），
+    盲目跟指针会得到一个「能查出 oid、稍后在 js-git 里才炸且不报原因」的引用。
+  **验证（本地，`--jitless`）**：全量 clone 上 `HEAD`/`HEAD~1`/`HEAD~3`/`main` 全部解析成功，
+  `HEAD~1..HEAD` 走出 **4 条真实改动路径**；depth-1 快照上 `HEAD~1` 立刻给
+  `GIT_NO_HISTORY: HEAD has fewer than 1 commit of history here …`。`force` replace 也实测：
+  snapshot（shallow=true, 1 commit）→ `force` clone（shallow=false, **128 commits**）。
+  单测 25 → **32**（6 条 `resolveRev` 用例，含「父提交不在库里」这一条）；六套件合计 **120**。
+  **方法论教训**：上一轮我接受了模型对文案的解读就改代码，没在本地跑一遍 `diff` 的真实路径——
+  于是把「所有仓库都失败」误诊成「只有快照失败」。**给模型的建议本身也是代码，必须实测**，
+  不能靠读起来合理。
+
 - **`git` 工具真机端到端：三个缺陷（2026-11-20 14:58–15:03，MatePad Mini）**。这一轮全部通过**模型**
   亲口触发（不是脚本调 API），共四轮：
   ①`log limit=3` → `1 commit in qtepp-deepseek-harness-harmony` + `228436f 2026-11-20 Instrument …`；

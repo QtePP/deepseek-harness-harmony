@@ -7,6 +7,18 @@
 
 ### 新增
 
+- **`git` 工具：`diff` 在任何仓库上都失败（严重，已被上一轮的「修复」掩盖）**：
+  `isomorphic-git` 的 `resolveRef` **不实现 ancestry 语法**——`HEAD~1`、`HEAD^` 在**128 个 commit
+  的全量 clone** 上也抛 `NotFoundError`（本地 `--jitless` 实测）。上一轮把「`diff` 默认失败」误诊成
+  depth-1 快照的问题，于是加了一条只认快照的守卫，还把「clone 全量历史」当成解决办法——两处都错。
+  现在自己走父链（`resolveRev`），并逐步校验父提交确实在对象库里（shallow clone 的 commit 对象
+  **记录**父 oid、但父不在库里）。实测：全量 clone 上 `HEAD` / `HEAD~1` / `HEAD~3` / `main` 全部可解析，
+  `HEAD~1..HEAD` 给出 4 条真实改动路径；快照上立刻报 `GIT_NO_HISTORY` 并说明只有一个 commit。
+
+- **`git` 工具加 `force`：设备上没有别的办法删仓库**：上一轮的文案让模型「删掉再重跑」，但工具表
+  26 个里没有 `rm`、没有 `bash`、没有 shell——模型和用户都做不到。`clone`/`snapshot` 现在接受
+  `force: true`，由建目录的人自己删。实测 snapshot（1 commit）→ `force` clone（**128 commits**）。
+
 - **`git` 工具的三处拒绝文案（真机发现）**：设备上让模型自己调这个工具，它把三条错误**原样复述**给
   用户，于是文案的错变成我们对用户说错话。①`GIT_TOO_LARGE` 原来写「needs more than 50 MB」，模型
   读成「事先探测后拒绝」，对用户说「没有下载任何 pack 字节」——实测是真流式中途 abort（5MB 上限下
