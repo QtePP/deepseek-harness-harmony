@@ -1,5 +1,9 @@
 # 启动链路：从点开图标到 dsh 挂载
 
+> 行号基准：2026-11-20（dsh 0.2.2-rc.5 / `bootstrap.cjs` 850 行 / `NodeHost.ets` 存档版）。
+> 行号会随改动漂移——**以函数名和符号为准**，数字只用来加快定位；改了 `host/` 或 `NodeHost.ets`
+> 请顺手校一次这里的数字。
+>
 > 这份文档只回答一个问题：**这个 App 是怎么把 dsh「拉起来」的**。
 > 仓库里那些 `.cjs` / `.mjs` / `.yml` 不是一条脚本流水线，而是三层东西：
 > 构建期装配、启动期引导、运行期垫片。真正「拉起」的只有一条链，读完后半段即可。
@@ -34,14 +38,14 @@ EntryAbility → Index.init → NodeHost.boot → NodeRuntime.start(dlopen libno
 | # | 阶段 | 代码 | 干什么 / 为什么 |
 |---|---|---|---|
 | 1 | 应用创建 | `entry/src/main/ets/entryability/EntryAbility.ets:11` | `onCreate` 先定外观（运行中 `setColorMode` 会重建窗口黑屏，必须启动期定），抓快捷方式与分享 intent |
-| 2 | 加载页面 | `EntryAbility.ets:55` | `loadContent('pages/Index')` |
-| 3 | 页面初始化 | `entry/src/main/ets/pages/Index.ets:223` → `:260` | `aboutToAppear` 里 `void this.init()`：读偏好、插件开关、项目、会话缓存，挂好回调，最后 `await this.boot()`（`:300`） |
+| 2 | 加载页面 | `EntryAbility.ets:56` | `loadContent('pages/Index')` |
+| 3 | 页面初始化 | `entry/src/main/ets/pages/Index.ets:233` → `:273` | `aboutToAppear` 里 `void this.init()`：读偏好、插件开关、项目、会话缓存、**首启问一次运行模式**，挂好回调，最后 `await this.boot()`（`:317`） |
 | 4 | 引导 | `entry/src/main/ets/host/NodeHost.ets:58` | `boot()` 是全链路的编排者，见 §2 |
-| 5 | 解包载荷 | `entry/src/main/ets/host/Payload.ets:21` | rawfile 里 ≈211MB 的 `dsh-payload.zip` 分 1MiB 块复制到沙箱再 `zlib.decompressFile`；归档长度当幂等戳（`payload.stamp`） |
+| 5 | 解包载荷 | `entry/src/main/ets/host/Payload.ets:21` | rawfile 里 ≈240MB 的 `dsh-payload.zip` 分 1MiB 块复制到沙箱再 `zlib.decompressFile`；归档长度当幂等戳（`payload.stamp`） |
 | 6 | 投递 Node | `NodeHost.ets:151` | `runtime.start()` 只表示「已投递到后台线程」，不代表起来了 |
 | 7 | 等主循环 | `NodeHost.ets:158` | `waitUntilRunning(30000)` 轮询原生探针；探针误报不算数，真正判据是下一步连上桥 |
 | 8 | 连桥 | `NodeHost.ets:169` → `model/DshClient.ets:59` | 连 `127.0.0.1:4517`，8 次 × 2s（真机上有几秒「Node 起了但还没 listen」的窗口） |
-| 9 | **首次连接触发 dsh** | `host/bootstrap.cjs:820` | 服务端 accept 到第一个 socket 才 `void boot()` —— 刻意如此：dsh 的 stdout 从第一帧起就有接收方 |
+| 9 | **首次连接触发 dsh** | `host/bootstrap.cjs:826` | 服务端 accept 到第一个 socket 才 `void boot()` —— 刻意如此：dsh 的 stdout 从第一帧起就有接收方 |
 | 10 | 握手上层 | `NodeHost.ets:174` / `:179` | ACP 走 `initialize`；SDK 走 `initialize(cwd, provider, model)`（180s 超时），成功后 `phase = READY` |
 
 ## 2. NodeHost.boot 的六件事
@@ -65,42 +69,42 @@ EntryAbility → Index.init → NodeHost.boot → NodeRuntime.start(dlopen libno
 
 ## 3. bootstrap.cjs 做了什么（835 行，按块读）
 
-`host/bootstrap.cjs` 是唯一在 Node 里跑的第一段代码，`main()` 在 `:789`。它按固定顺序铺好垫片，
+`host/bootstrap.cjs`（850 行）是唯一在 Node 里跑的第一段代码，`main()` 在 `:804`。它按固定顺序铺好垫片，
 **然后才**去加载 dsh —— 顺序错了就白搭（见每个函数注释里的「Must run before …」）。
 下表 1–9 是垫片，10 是启动前的最后一次改写：
 
 | 顺序 | 函数 | 行 | 解决什么 |
 |---|---|---|---|
-| 1 | `rerouteConsole` | `:174` | stdout 要留给 JSON-RPC，console 全部改写进 `bridge.log` |
-| 2 | `installRequireBuiltinAlias` | `:659` | `node-addon-require-builtin` 没有 openharmony 构建，别名到纯 JS 垫片（要 `--expose-internals`） |
-| 3 | `installSharpStub` | `:771` | `sharp` 只有 darwin-arm64 / wasm32 绑定，设备上必炸；重定向到纯 JS 桩（图片原字节直通） |
-| 4 | `installLinkFallback` | `:357` | 沙箱禁 hardlink（EACCES）→ 降级 `copyFile(COPYFILE_EXCL)` |
-| 5 | `installDirSyncFallback` | `:400` | 祖先目录 `/data` 只读打开被拒 → 给个空壳 handle（否则内联图片每轮都报「unable to persist」） |
-| 6 | `installUserStorageChmodFallback` | `:530` | `/storage/Users/` 这个 userfile 挂载不支持 chmod/chown，EPERM 一律吞掉 |
-| 7 | `installUserStorageCopyFallback` | `:573` | 同一挂载上 libuv 的 FICLONE 回落到用户态循环 |
-| 8 | `installFileHandleFallbacks` | `:444` | 目录 fsync 被拒、挂载不支持 mode 变更 → 只在目录/该挂载上容忍 |
-| 9 | `installProfileTemplate` | `:728` | 把 `payload/profile-ohos/profiles/ohos` 按内容哈希装进 `$DSH_HOME/profiles/ohos` |
-| 10 | **acp → ohos 重映射** | `:800` | 模板装好了就把 `DSH_PROFILE=acp` 改成 `ohos`：自定义 profile 才能 insert 新行 |
+| 1 | `rerouteConsole` | `:189` | stdout 要留给 JSON-RPC，console 全部改写进 `bridge.log` |
+| 2 | `installRequireBuiltinAlias` | `:674` | `node-addon-require-builtin` 没有 openharmony 构建，别名到纯 JS 垫片（要 `--expose-internals`） |
+| 3 | `installSharpStub` | `:786` | `sharp` 只有 darwin-arm64 / wasm32 绑定，设备上必炸；重定向到纯 JS 桩（图片原字节直通） |
+| 4 | `installLinkFallback` | `:372` | 沙箱禁 hardlink（EACCES）→ 降级 `copyFile(COPYFILE_EXCL)` |
+| 5 | `installDirSyncFallback` | `:415` | 祖先目录 `/data` 只读打开被拒 → 给个空壳 handle（否则内联图片每轮都报「unable to persist」） |
+| 6 | `installUserStorageChmodFallback` | `:545` | `/storage/Users/` 这个 userfile 挂载不支持 chmod/chown，EPERM 一律吞掉 |
+| 7 | `installUserStorageCopyFallback` | `:588` | 同一挂载上 libuv 的 FICLONE 回落到用户态循环 |
+| 8 | `installFileHandleFallbacks` | `:459` | 目录 fsync 被拒、挂载不支持 mode 变更 → 只在目录/该挂载上容忍 |
+| 9 | `installProfileTemplate` | `:743` | 把 `payload/profile-ohos/profiles/ohos` 按内容哈希装进 `$DSH_HOME/profiles/ohos` |
+| 10 | **acp → ohos 重映射** | `:815`（`main()` 内联，无独立函数） | 模板装好了就把 `DSH_PROFILE=acp` 改成 `ohos`：自定义 profile 才能 insert 新行 |
 
-另有一处不在 `main()` 里：`installJitlessShims()`（`:188`）在 `boot()` 开头（`:299`）才跑，
+另有一处不在 `main()` 里：`installJitlessShims()`（`:203`）在 `boot()` 里（`:314`）才跑，
 先探 `typeof WebAssembly`，缺失才装 `fetch-shim` 并注册 ESM 的 `undici` 别名 —— 有 JIT 的桌面
 环境自然跳过这一层。
 
-然后是 `net.createServer`（`:811`）：
+然后是 `net.createServer`（`:826`）：
 
-- **单客户端**：新连接 `replacing previous client` 顶掉旧的（`:812-815`）。
-- `adoptSocket`（`:249`）把 socket 管道接进**进程级**的 `PassThrough`（`:240`），并用
-  `Object.defineProperty` 覆盖 `process.stdin/stdout`（`:217`）——Node 24 里这俩是 getter-only 的访问器，
+- **单客户端**：新连接 `replacing previous client` 顶掉旧的（`:827-831`）。
+- `adoptSocket`（`:264`）把 socket 管道接进**进程级**的 `PassThrough`（`:255`），并用
+  `Object.defineProperty` 覆盖 `process.stdin/stdout`（`swapStdio`，`:232`）——Node 24 里这俩是 getter-only 的访问器，
   直接赋值会抛。
-- socket 断开只 pause 不 end（`:256-262`）：stdin EOF 会被 dsh 当成 shutdown，UI 掉线不能杀运行时。
+- socket 断开只 pause 不 end（`:271-277`）：stdin EOF 会被 dsh 当成 shutdown，UI 掉线不能杀运行时。
 
-`boot()`（`:268`）里真正拉起 dsh 的只有三行：
+`boot()`（`:283`）里真正拉起 dsh 的只有三行：
 
 ```js
-const argv = [process.execPath, bin, '--profile', PROFILE, '--patch', …]  // :312
-process.argv = argv                                                       // :325
-const entry = await import(pathToFileURL(bin).href)                       // :329
-await entry.runCli()                                                      // :335
+const argv = [process.execPath, bin, '--profile', PROFILE, '--patch', …]  // :327
+process.argv = argv                                                       // :340
+const entry = await import(pathToFileURL(bin).href)                       // :344
+await entry.runCli()                                                      // :350
 ```
 
 两个坑写在这里：`bin.js` 只在 `import.meta.main` 为真时自执行，动态 import 永远为假，所以必须
@@ -110,11 +114,11 @@ await entry.runCli()                                                      // :33
 
 载荷里 `node_modules/@deepseek-ai/dsh/lib/`（0.2.2-rc.5）：
 
-- `bin.js:207` `runCli()`：commander 解析 → `profile` 模式 → `runProfile()`（`:215`）。
+- `bin.js` 只是 29 行的转发壳：`runCli()`（`bin.js:20`）实体在同目录的 `bin-*.js` 里（哈希文件名，别按行号引）。commander 解析 → `profile` 模式 → `runProfile()`。
   它只认自己的旗标（`--profile` / `--patch` / `--dump-config`），其余原样交给被挂载的 app 插件。
-- `profile-boot-*.js:255` `runProfile()`：`composeProfile()`（`:272`）把**补丁层**叠起来 ——
+- `profile-boot-*.js` 的 `runProfile()`：`composeProfile()`（rc.5 里在 `profile-boot-QhDEDXsF.js:237`）把**补丁层**叠起来 ——
   `package.json` 的 `dsh.profile.bundles` 顺序、profile 自己的 `cordis.patch.yml`、
-  `$DSH_HOME/cordis.patch.yml`、每个 `--patch` 覆盖层 —— 然后在 `:302` 用 cordis loader `boot()`
+  `$DSH_HOME/cordis.patch.yml`、每个 `--patch` 覆盖层 —— 然后在 `:313` 用 cordis loader `boot()`
   把插件树挂起来。`runProfile` 的 promise 在树挂载后 resolve（dsh 自己的循环继续跑）。
 
 profile 是 `host/profile-ohos/profiles/ohos/package.json`：
@@ -128,7 +132,7 @@ profile 是 `host/profile-ohos/profiles/ohos/package.json`：
 以及 DeepSeek 模型目录覆写（**`tools.mode` 在 0.2.2 已被删除**，写它直接启动失败）。
 
 而 `host/patches/ohos.patch.yml` 是**平台禁用清单**（pwsh / plugin-manager / office / bash / jobs），
-`entry/.../common/PluginConfig.ets:62` 生成的 `user.patch.yml` 是设置页开关，两者都作为 `--patch`
+`entry/.../common/PluginConfig.ets:66` 生成的 `user.patch.yml` 是设置页开关，两者都作为 `--patch`
 传入，后者在后、覆盖前者。
 
 ## 5. 「很多脚本」的分类表

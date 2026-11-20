@@ -491,6 +491,10 @@ ACP 实测契约（勿凭直觉改）：
    本地三段验证（装机前先过一遍，全绿再部署）。**一条命令即可全跑**：
    `bash scripts/test.sh`（= payload 单测 + ArkTS 检查 + LocalUnit + 设备端 ohosTest；
    子集用 `unit` / `arkts` / `local` / `device` / `ui "<自然语言计划>"`）。
+   **同一个 `unit` 也在 CI 上跑**：`.github/workflows/payload.yml` 在 `host/**` / `scripts/**`
+   变更时触发，`assemble-payload.mjs --skip-pack` 装好钉死的 dsh 后跑四个插件套件 + 一次
+   `--dump-config` 行 id 校验。它**不需要 DevEco、不需要设备、不需要签名**——只证明「我们写的
+   那部分在钉死的 dsh 上仍然通过」。载荷 zip 与 HAP 都是**构建产物，不进 git**。
    **两个坑写死在脚本里，手工跑时同样要小心**：
    (1) `hvigorw test` 断言失败时**仍 exit 0**，失败只表现为日志里的
    `ERROR: Error in <用例>` —— 不能靠退出码判断；

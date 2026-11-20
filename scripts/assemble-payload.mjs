@@ -20,6 +20,7 @@
  * Usage:
  *   node scripts/assemble-payload.mjs                # install the pinned version + pack
  *   node scripts/assemble-payload.mjs --skip-install  # repack existing staging
+ *   node scripts/assemble-payload.mjs --skip-pack     # stage only (CI runs the plugin tests here)
  *   node scripts/assemble-payload.mjs --dsh-version 0.2.2-rc.6   # explicit override
  *
  * The version is PINNED, not `latest`: this tree is the single source of the
@@ -46,6 +47,9 @@ const HOST_DIR = join(ROOT, 'host')
 const PINNED_DSH_VERSION = '0.2.2-rc.5'
 
 const skipInstall = args.includes('--skip-install')
+// CI needs the staged tree (to run the plugin unit tests) but must not spend
+// two minutes compressing 1 GB into a 240 MB zip it will not use.
+const skipPack = args.includes('--skip-pack')
 const versionIndex = args.indexOf('--dsh-version')
 const dshVersion = versionIndex >= 0 ? args[versionIndex + 1] : PINNED_DSH_VERSION
 
@@ -208,6 +212,11 @@ stageProfileTemplate()
 pruneForeignPlatformPackages()
 patchNodeModules()
 const version = verify()
-pack()
-process.stdout.write(`\ndone — dsh ${version} packaged for HarmonyOS\n`)
-process.stdout.write('next: hvigorw assembleHap (or Build > Build Hap(s) in DevEco Studio)\n')
+if (skipPack) {
+  process.stdout.write(`\ndone — dsh ${version} staged at ${STAGING} (--skip-pack, no zip)\n`)
+  process.stdout.write('next: bash scripts/test.sh unit (payload plugin suites)\n')
+} else {
+  pack()
+  process.stdout.write(`\ndone — dsh ${version} packaged for HarmonyOS\n`)
+  process.stdout.write('next: hvigorw assembleHap (or Build > Build Hap(s) in DevEco Studio)\n')
+}

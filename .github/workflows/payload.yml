@@ -1,0 +1,89 @@
+name: payload
+
+# What this pipeline is for
+# -------------------------
+# The AI capability lives in the payload (`host/` sources + the pinned dsh
+# tree), and the four plugins we wrote are the only part of it that is ours.
+# This workflow proves they still pass against the pinned dsh, on every change
+# to `host/` or `scripts/`.
+#
+# What it deliberately does NOT do:
+#   · build or sign a HAP — that needs DevEco Studio's SDK (hvigor, hdc,
+#     hap-sign-tool) and a Huawei account, neither of which exists on a runner;
+#   · pack the 240 MB zip — two minutes of deflate for an artefact CI cannot
+#     hand to anyone anyway. `--skip-pack` stages the tree and stops;
+#   · touch secrets — there are none in this repository by design.
+#
+# Release artefacts (the payload zip) live on GitHub Releases, never in git:
+#   scripts/publish-payload.sh   # build → sha256 → upload to a Release
+#   scripts/fetch-payload.sh     # download + verify (no npm install needed)
+
+on:
+  push:
+    paths:
+      - 'host/**'
+      - 'scripts/**'
+      - '.github/workflows/payload.yml'
+  pull_request:
+    paths:
+      - 'host/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-suites:
+    name: payload plugin suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 is the documented local toolchain (AGENTS.md §6). The device
+      # runs 24.2.0, so the plugin suites are written to be version-agnostic;
+      # `node --test` under 22 is the conservative choice for CI.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Stage = npm install the pinned dsh + copy host/*.cjs + install the
+      # ohos profile template + apply the flock patch. No zip.
+      - name: Stage the payload tree
+        run: node scripts/assemble-payload.mjs --skip-pack
+
+      # Four suites: 38 (pure-JS search) / 22 (ptc runtime) / 8 (credentials
+      # live) / 20 (boot report). The ptc suite also runs under --jitless,
+      # because that is the only execution mode the phone has.
+      - name: Run the plugin suites
+        run: bash scripts/test.sh unit
+
+      # `--profile ohos` reads `$DSH_HOME/profiles/ohos` and does not install
+      # it, so the home has to be seeded from the staged template first.
+      - name: Seed the profile home
+        run: |
+          mkdir -p .build/ci-home/profiles
+          cp -R .build/payload/profile-ohos/profiles/ohos .build/ci-home/profiles/ohos
+
+      # Cheap guard against the class of bug that stops a boot: a patch row
+      # whose id no longer exists, or an inserted row that silently did not
+      # compose. `--dump-config` fails loudly on the former, these greps on
+      # the latter.
+      - name: Compose the ohos profile
+        run: |
+          DSH_HOME=.build/ci-home node .build/payload/node_modules/@deepseek-ai/dsh/lib/bin.js \
+            --profile ohos --patch .build/payload/patches/ohos.patch.yml --dump-config > /tmp/dump.txt
+          for row in boot-report-ohos credentials-live-ohos ptc-runtime-vm tool-fs-search-ohos time-context; do
+            grep -q "id: $row" /tmp/dump.txt || { echo "row missing: $row"; exit 1; }
+          done
+          for row in tool-bash tool-jobs tool-fs-search ptc-runtime; do
+            awk -v id="^- id: $row\$" '
+              $0 ~ id { inside = 1; next }
+              inside && /^- id: / { exit }
+              inside { print }
+            ' /tmp/dump.txt | grep -q 'disabled: true' \
+              || { echo "row not disabled: $row"; exit 1; }
+          done
+          echo "profile composed"
