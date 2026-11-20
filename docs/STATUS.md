@@ -32,7 +32,7 @@
   因直连恰好通而「测试通过」——假证据）；`createConnection` 必须同步返回 socket（异步建连放 `addRequest`）；
   socket 未 attach 时 `destroy(error)` 不触发 error、请求永久挂起。
 
-- **`user_profile` 交付：跨会话画像第一次有了通道（2026-11-20 16:10，本地闭环，真机待验）**。
+- **`user_profile` 交付并真机闭环：跨会话画像第一次有了通道（2026-11-20 16:10 本地 / 16:27 真机）**。
   起点是一个问题：「切了对话，它还记得我吗」。答案原来是**不记得**——搜遍载荷，
   `dsh-persona` 是部署方写死的 persona 前缀、`dsh-personalized-recommendations` 推的是插件卡片，
   **没有任何插件写用户画像**；唯一跨会话的通道是 `dsh-agent-instructions`。
@@ -51,7 +51,20 @@
   验证：单测 **26/26**（含 `--jitless`）、`bash scripts/test.sh unit` 六套全绿（38/22/8/20/38/26）、
   `--dump-config` 新行命中、冒烟 `tools(27)` 里出现 `user_profile`；端到端再走一遍
   **写 → 下一轮上下文读到**（用户自己的「回答用中文」与新写的两条画像同时在），日期串也在。
-  **真机未验**：装后需要确认一次「新会话开口就知道画像」这条。
+  **真机闭环（2026-11-20 16:27，MatePad Mini / MLR-AL00，`deploy.sh` 调试签名）**：
+  装机后 `bridge.log` 的 `tools(27)` 里出现 `user_profile`（其余 26 个不变）。用 `hdc fport` 从电脑
+  直接驱动设备端 ACP，不走界面——
+  ①让模型自己调工具：两轮 `tool_call` 各一次 `add`，模型答「两条都已记录成功」；
+  设备上 `dsh-home/AGENTS.md` 落盘 508 字节，两条带 `2026-11-20` 日期，权限 644（应用 uid 所有）；
+  ②**新开会话**问「你对我了解什么」→ 答「只有两条（来自会话加载的用户画像，记录于 2026-11-20）」，
+  两条内容复述正确 —— 证明 `dsh-agent-instructions` 真的把它拼进了新会话的首条请求；
+  ③测 `replace`：`match="HarmonyOS tablet"` 取代成更长的版本，设备文件里**旧行消失、只有新行**，
+  不是并存 —— 这正是「画像会漂移」那条设计要的行为；
+  ④**force-stop 冷启**后再开新会话，仍然答得出两条（含 replace 后的新措辞），
+  `bridge-status.json` 为 `state: running / profile: ohos / node: v24.2.0` —— 跨重启成立。
+  **一条顺带取证的平台事实**：`hdc shell` 写不进 `dsh-home/`（`cp` 报 `Permission denied`），
+  说明沙箱边界在；而工具能写，是因为它跑在应用进程内、用的是 `node:fs` 而不是 `ctx.fs` 栅栏。
+  另：`fport` 建立的隧道在 force-stop 后失效（`TCP Port listen failed`），重连要先重开转发。
 
 ---
 
