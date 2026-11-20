@@ -7,6 +7,12 @@
 
 ### 新增
 
+- **`force` 删了才克隆，一次超时就把唯一副本弄没了（真机发现，严重）**：第一版 `force` 是「先删、
+  再 clone」。平板上一跑，GitHub 超时，仓库从 `repos/` 里**彻底消失**，随后的 `log`/`diff` 只能报
+  「not cloned yet」。现改为**先克隆到同级临时目录 `.qtepp-<slug>.incoming`，成功后才删旧的再
+  `rename`**：失败时旧副本原封不动。本地 `--jitless` 的对照实验（真实 GitHub + 一个不存在的仓库）：
+  失败后旧副本仍在（1 commit），成功后换入全量历史（128 commits）且临时目录不残留。
+
 - **`git` 工具：`diff` 在任何仓库上都失败（严重，已被上一轮的「修复」掩盖）**：
   `isomorphic-git` 的 `resolveRef` **不实现 ancestry 语法**——`HEAD~1`、`HEAD^` 在**128 个 commit
   的全量 clone** 上也抛 `NotFoundError`（本地 `--jitless` 实测）。上一轮把「`diff` 默认失败」误诊成

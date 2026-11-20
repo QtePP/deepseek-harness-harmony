@@ -12,6 +12,18 @@
 
 ---
 
+- **`git` 真机第三轮：`force` 把仓库弄丢了（2026-11-20 15:35–15:37，MatePad Mini）**。部署带
+  `force` + `resolveRev` 的版本后，让模型走 `clone force=true → diff → log`。剧情是坏的：
+  **第一次 `clone force=true` 撞上 `request to github.com timed out`**，而第一版 `force` 的实现是
+  「先 `rm -rf` 再 clone」——于是平板上的唯一副本**直接消失**，后续两次调用只能报
+  `repos/qtepp-deepseek-harness-harmony is not cloned yet`。这是我在**同一次会话里**先加 `force`、
+  后加 `resolveRev`，却只本地验了「成功后」的路径，没验「失败时」。修法：`force` 改为
+  **克隆到同级 `.qtepp-<slug>.incoming` 临时目录，成功后才删旧的再 `rename`**；失败时 `rm` 临时目录。
+  本地对照实验（真实 GitHub + 一个不存在的仓库名）：失败后旧副本完好（1 commit，仍 shallow），
+  成功后换入 128 commits、`.git/shallow` 消失、临时目录不残留。单测 33/33（新增 1 条 staging 断言）。
+  **方法论**：破坏性操作只验 happy path 等于没验——`force` 的语义是「替换」，它的失败情形正是
+  「用户丢数据」那一种，必须先把这条路径做出来再部署。
+
 - **`git` 工具真机第二轮：又两个缺陷，其中一个是「上一轮修错了」（2026-11-20 15:22，MatePad Mini）**。
   把上一轮的三条文案改进重新部署后再让模型跑一遍，并从设备会话日志（`session.v4.jsonl.zstd`）取**原始
   返回文本**核对，不只看模型复述：
