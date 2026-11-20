@@ -12,6 +12,26 @@
 
 ---
 
+- **`git` 走设备自己的系统代理（2026-11-20 16:20，MatePad Mini）**。起因是用户问「我的手机没翻墙
+  你咋拉代码」——我先取证再回答，结论与我原来的假设相反：**平板是直连的，没走我的 Mac**。
+  证据：平板 `wlan0` = `10.93.118.222`，我的 Mac `en0` = `7.246.173.82`；平板 **0 个** `tun/utun/ppp`
+  接口；系统代理参数为空；`node.log`/`bridge.log` 无 `*_PROXY`；我们的 `http.js` **只认 hostname/port**。
+  平板把 `github.com` 解析到 `20.247.166.64`、`codeload` 到 `20.6.7.16`，92–182ms 可达
+  ——是**运营商/DNS 侧给的可用出口**，不是翻墙。旁证：同一条命令 `ping 110.242.68.66`（百度）
+  **100% 丢包**，说明「通不通」按目标分化，不能拿「能不能上网」一个标准判断。
+  **所以真正的缺口是**：一旦那条出口不通，`git` 就废了——工具表没有 `bash`/`curl`/`wget`
+  （`toybox` 连 `tr` 都不给），且 `http.js` 不认代理，**在平板上开代理 App 对它无效**。
+  **做法（不依赖本机，符合「演示要看平板自己」）**：ArkTS `connection.getDefaultHttpProxy()` →
+  `DSH_HTTPS_PROXY` → `proxyFromEnv()` → 自建 `ProxyTunnelAgent`（CONNECT + 端到端 TLS）。
+  真机实证：`bridge.log` 出 `git network: direct (no system proxy)`——本机确实没配代理，
+  而**这条链路已经在设备上跑通了**；配了代理就会显示 `proxy host:port`。
+  本地三条路径全验（`--jitless`）：经隧道克隆成功（代理收到 2 次 `CONNECT github.com:443`，2.1MB）、
+  死代理立即报 `ECONNREFUSED`、407 立即报 `answered CONNECT … 407`、无代理直连正常。
+  单测 `proxyFromEnv` 5 条（socks 明确拒绝而不是假装能隧道、坏 URL 不抛）。git 套件 33 → **38**。
+  **三个坑（都记进 CHANGELOG）**：请求级 `createConnection` 被 Node 静默忽略（第一版代理**从未生效**，
+  因直连恰好通而「测试通过」——假证据）；`createConnection` 必须同步返回 socket（异步建连放 `addRequest`）；
+  socket 未 attach 时 `destroy(error)` 不触发 error、请求永久挂起。
+
 - **`user_profile` 交付：跨会话画像第一次有了通道（2026-11-20 16:10，本地闭环，真机待验）**。
   起点是一个问题：「切了对话，它还记得我吗」。答案原来是**不记得**——搜遍载荷，
   `dsh-persona` 是部署方写死的 persona 前缀、`dsh-personalized-recommendations` 推的是插件卡片，

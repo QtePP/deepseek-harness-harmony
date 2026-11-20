@@ -5,6 +5,7 @@ import { Payload } from './Payload'
 import { AppConfig } from '../common/AppConfig'
 import { DshClient } from '../model/DshClient'
 import { AcpClient } from '../model/AcpClient'
+import { ProxyProbe } from '../common/ProxyProbe'
 
 /** Boot progress surfaced by the splash screen. */
 export enum BootPhase {
@@ -121,6 +122,10 @@ export class NodeHost {
         } catch (error) {
           // A missing key file only degrades to "no credentials"; never block boot.
         }
+        // Git needs to reach GitHub. The device may sit behind a proxy the user
+        // configured in System Settings; Node knows nothing about it, so pass
+        // the address through env. Empty string means "go direct".
+        const proxyUrl = await ProxyProbe.local()
         const options: NodeRuntimeOptions = {
           scriptPath: `${this.payloadRoot}/bootstrap.cjs`,
           payloadRoot: this.payloadRoot,
@@ -139,7 +144,8 @@ export class NodeHost {
             DSH_PATCH_FILE: hasPatch ? patchPath : '',
             DSH_USER_PATCH_FILE: hasUserPatch ? userPatchPath : '',
             DSH_PROFILE: AppConfig.profile,
-            DSH_PERMISSION_MODE: AppConfig.permissionMode
+            DSH_PERMISSION_MODE: AppConfig.permissionMode,
+            DSH_HTTPS_PROXY: proxyUrl
           },
           onStateChange: (state: NodeState, note?: string) => {
             if (state === NodeState.FAILED) {

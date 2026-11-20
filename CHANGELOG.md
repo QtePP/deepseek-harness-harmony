@@ -12,6 +12,20 @@
   `clone force=true`（4.4 MB / 13.0s）→ `diff` 不传 `base`/`head` 得到 `4 paths changed in
   HEAD~1..HEAD`。设备 `repos/` 无 `.incoming` 残留、无 `.git/shallow`。
 
+- **`git` 跟随设备的系统代理（不再假设能直连 GitHub）**：平板上确实能直连（`github.com` →
+  `20.247.166.64`，92–182ms），但这不是保证——同一天就撞过两次超时。而 HarmonyOS 只把系统代理暴露
+  给 ArkTS（`connection.getDefaultHttpProxy()`），Node 完全不知道它存在，`http.js` 也不认代理，于是
+  「用户在设置里开了代理」对 `git` 毫无作用。现在：ArkTS 读系统代理 → `DSH_HTTPS_PROXY` 环境变量 →
+  `proxyFromEnv()` → 自建 **`ProxyTunnelAgent`**（CONNECT 隧道 + 端到端 TLS）。**零依赖本机**：
+  平板自己就能走代理，Mac 不进链路。实测（本地 CONNECT 代理，`--jitless`）：代理收到
+  `CONNECT github.com:443` ×2、克隆成功 2.1MB；死代理与 407 都**立即报错而不是挂起**；
+  直连（无代理）仍正常。`bridge.log` 新增一行 `git network: direct|proxy …`，演示时一眼可见。
+  **三个踩过的坑**：①请求级 `createConnection` 会被 Node 静默忽略（钩子在 Agent 上），第一版
+  「代理支持」因此**从未生效**，而直连恰好能通，测试于是「通过」了——假证据；②`createConnection`
+  必须**同步**返回 socket，返回 Promise 会得到 `s.on is not a function`，异步建连只能放 `addRequest`；
+  ③socket 尚未 attach 时 `request.destroy(error)` **不触发 error 事件**，请求永久挂起（三条代码就能复现），
+  需先挂一个死 socket 再 destroy。`proxyFromEnv` 另有 5 条单测（含拒绝 socks、坏 URL 不抛）。
+
 - **`force` 删了才克隆，一次超时就把唯一副本弄没了（真机发现，严重）**：第一版 `force` 是「先删、
   再 clone」。平板上一跑，GitHub 超时，仓库从 `repos/` 里**彻底消失**，随后的 `log`/`diff` 只能报
   「not cloned yet」。现改为**先克隆到同级临时目录 `.qtepp-<slug>.incoming`，成功后才删旧的再

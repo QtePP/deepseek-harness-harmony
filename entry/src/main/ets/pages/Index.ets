@@ -7,6 +7,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit'
 import { BusinessError } from '@kit.BasicServicesKit'
 import { BootPhase, NodeHost } from '../host/NodeHost'
 import { AppConfig } from '../common/AppConfig'
+import { ProxyProbe } from '../common/ProxyProbe'
 import { PluginConfig } from '../common/PluginConfig'
 import { PluginCatalog, PluginRow } from '../model/PluginCatalog'
 import { ChatMessage, ContentHit, Role, SessionStore, SessionSummary, ToolTrace, newSessionId, titleOf } from '../model/ChatModel'
@@ -142,6 +143,8 @@ struct Index {
   @State showFiles: boolean = false
   @State filesTick: number = 0
   @State diagnostics: string = ''
+  /** "direct" or the system proxy git will tunnel through. */
+  @State proxyLine: string = '检查中…'
   @State widthVp: number = 360
   @State title: string = '新会话'
   @State pluginRows: PluginRow[] = []
@@ -2365,15 +2368,27 @@ struct Index {
     this.showSettings = false
   }
 
+  private refreshProxyLine(): void {
+    ProxyProbe.local().then((url) => {
+      this.proxyLine = url.length === 0 ? '直连（未配置系统代理）' : `经系统代理 ${url}`
+    }).catch(() => {
+      this.proxyLine = '直连（读取系统代理失败）'
+    })
+  }
+
   private refreshDiagnostics(): void {
     if (this.context === null) {
       return
     }
+    this.refreshProxyLine()
     const lines: string[] = []
     lines.push(`phase: ${this.phase}`)
     lines.push(`detail: ${this.detail}`)
     lines.push(`server: ${this.host.isAcp() ? this.host.acp.getServerInfo() : this.host.client.getServerInfo()}`)
     lines.push(`profile: ${AppConfig.profile} (${AppConfig.permissionMode})`)
+    // Whether git can reach GitHub is the question a demo actually asks, so
+    // answer it here instead of leaving it to be discovered by a timeout.
+    lines.push(`git network: ${this.proxyLine}`)
     lines.push(`crash: ${this.host.crashInfo()}`)
     lines.push('--- bridge ---')
     lines.push(this.host.bridgeStatus(this.context))
