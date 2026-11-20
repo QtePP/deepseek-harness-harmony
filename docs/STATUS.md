@@ -12,6 +12,30 @@
 
 ---
 
+- **`git` 工具真机端到端：三个缺陷（2026-11-20 14:58–15:03，MatePad Mini）**。这一轮全部通过**模型**
+  亲口触发（不是脚本调 API），共四轮：
+  ①`log limit=3` → `1 commit in qtepp-deepseek-harness-harmony` + `228436f 2026-11-20 Instrument …`；
+  ②`status` → `qtepp-deepseek-harness-harmony is clean (159 paths)`；
+  ③三条守卫按名触发，错误都是单行、无堆栈——`pull` → `GIT_SHALLOW`、`clone` 已存在 → `GIT_EXISTS`、
+  `action=sync` → `GIT_BAD_ACTION`（错误里列全 6 个合法 action）；
+  ④`snapshot microsoft/vscode` → `GIT_TOO_LARGE`，`repos/` 下**没有**留下 `microsoft-vscode/` 半成品，
+  前一份 depth-1 副本完好（159 路径 / 228436f），平板没被撑爆。
+  **模型从错误文案里读出了三个真问题**（它写进了回答，我们据此改代码，这是本轮最有价值的产出）：
+  - **超限发生在传输中途，文案却写成先验判断**。原文案 `needs more than 50 MB of packfile` 被理解成
+    「事先探测到大小再拒绝」，模型据此对用户说「没有下载任何 pack 字节」。实测（本地 `--jitless` 探针，
+    上限 5MB）是**真流式 abort**：`cap hit at 6299474 bytes` / 16.5s，即越过 6,291,456 之后立刻断连。
+    改法：`tooLargeMessage()` 明说 `exceeded the N MB limit after X of transfer, so the connection was
+    aborted mid-stream and the partial tree was deleted`，且删掉 `needs more than` 措辞。
+  - **`pull` 与 `clone` 的建议互相打架**：`pull` 说「delete it and clone again」，`clone` 说「use action
+    pull」。对一个 depth-1 副本，这条闭环是死的。改法：两处文案各自说清分支（full history → pull；
+    snapshot → 删了重跑 snapshot；确实需要历史才 clone），并加 `existsMessage()` / `shallowMessage()`
+    两个纯函数 + 5 条断言（含「不许出现 needs more than」）。
+  - **`diff` 默认 `HEAD~1` 在 depth-1 副本上必然失败**，报的还是 `Could not find HEAD~1`——看起来像仓库坏了。
+    改法：默认 base 且存在 `.git/shallow` 时提前抛 `GIT_NO_HISTORY`，说明「只有一个 commit，没有 HEAD~1，
+    请显式传 base=/head=，或 clone 全量历史」。**未改默认行为**（显式传 base/head 仍然可用，模型当场验过）。
+  单测 20 → **25**；六套件合计 108 → **113**。**契约**：这类"给模型看的拒绝文案"属于产品表面，
+  必须可测——模型会把它们复述给用户，措辞错了就是我们在骗用户。
+
 - **平板重装新载荷（2026-11-20 14:56，MatePad Mini / tablet）**：`assemble-payload` 重打后 zip
   **239,893,674 B**（+17.3KB；相对上一份的唯一变化是 `glob` 描述与新增的 `docs/STATUS.md`），
   `deploy.sh` 覆盖安装直接成功——**签名没再轮换，所以没有 `9568332`**；安装保留数据 ⇒

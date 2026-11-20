@@ -7,6 +7,16 @@
 
 ### 新增
 
+- **`git` 工具的三处拒绝文案（真机发现）**：设备上让模型自己调这个工具，它把三条错误**原样复述**给
+  用户，于是文案的错变成我们对用户说错话。①`GIT_TOO_LARGE` 原来写「needs more than 50 MB」，模型
+  读成「事先探测后拒绝」，对用户说「没有下载任何 pack 字节」——实测是真流式中途 abort（5MB 上限下
+  在 6,299,474 字节断连，16.5s），现改为 `exceeded the N MB limit after X of transfer … aborted
+  mid-stream and the partial tree was deleted`；②`pull` 让人「删了重 clone」而 `clone` 让人「用 pull」，
+  对 depth-1 副本是死循环，现在两处各自说清该走哪条（刷新 snapshot / 要历史才 clone）；
+  ③`diff` 默认 `HEAD~1` 在单 commit 副本上抛 `Could not find HEAD~1`，像仓库坏了，现在提前报
+  `GIT_NO_HISTORY` 并指明显式传 `base`/`head`。三条文案抽成可测函数（`tooLargeMessage` /
+  `existsMessage` / `shallowMessage`），单测 20 → 25。
+
 - **验收日志独立成 `docs/STATUS.md`**：`AGENTS.md` §7 长出 37KB 的逐条验收记录后，整份文件
   超过了 agent 指令预算（65536 B），加载时尾部被截断——也就是说「Skill 路由」那一节读不到。
   把**证据日志**（哪台设备、哪次构建、验了什么、代价多大、踩了什么坑）原文搬到 `docs/STATUS.md`，
